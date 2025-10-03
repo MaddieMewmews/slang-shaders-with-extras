@@ -50,7 +50,7 @@ layout(push_constant) uniform Push
 
 #pragma parameter bogus_color "[ COLOR TWEAKS ]:" 0.0 0.0 1.0 1.0
 
-#pragma parameter CS "          Display Gamut: sRGB, Modern, DCI, Adobe, Rec.2020" 0.0 0.0 4.0 1.0 
+#pragma parameter CS "          Display Gamut: sRGB, Modern, DCI, Adobe, Rec.2020, P3" 0.0 0.0 5.0 1.0 
 
 #pragma parameter CP "          CRT Profile: EBU | P22 | SMPTE-C | Philips | Trin." 0.0 -1.0 5.0 1.0 
 
@@ -169,16 +169,16 @@ mat3(
 
 const mat3 ToModern = 
 mat3(
- 2.791723,	-0.894766,	0.041678,
--1.173165,	 1.815586, -0.130886,
--0.440973,	 0.032000,	1.002034
+ 2.791723, -0.894766,  0.041678,
+-1.173165,  1.815586, -0.130886,
+-0.440973,  0.032000,  1.002034
 );
 
 const mat3 ToDCI = 
 mat3(
- 2.493497,	-0.829489,	0.035846,
--0.931384,	 1.762664, -0.076172,
--0.402711,	 0.023625,	0.956885
+ 2.973422, -0.867605,  0.045031,
+-1.110433,  1.843757, -0.095697,
+-0.480247,  0.024743,  1.201215
 );
 
 const mat3 ToAdobe = 
@@ -193,6 +193,13 @@ mat3(
  1.716651, -0.666684,  0.017640,
 -0.355671,  1.616481, -0.042771,
 -0.253366,  0.015769,  0.942103
+); 
+
+const mat3 ToP3 = 
+mat3(
+ 2.493509, -0.829473,  0.0358512,
+-0.931388,  1.762630, -0.0761839,
+-0.402712,  0.023624,  0.9570296
 ); 
 
 // Color temperature matrices
@@ -314,7 +321,8 @@ void main()
 	if (CS == 1.0) { p = 2.2; m_out =  ToModern; } else	
 	if (CS == 2.0) { p = 2.6; m_out =  ToDCI;    } else
 	if (CS == 3.0) { p = 2.2; m_out =  ToAdobe;  } else
-	if (CS == 4.0) { p = 2.4; m_out =  ToREC;    }
+	if (CS == 4.0) { p = 2.4; m_out =  ToREC;    } else
+	if (CS == 5.0) { p = 2.2; m_out =  ToP3;     }
 	
 	color = pow(c, vec3(p));
 	

@@ -10,7 +10,7 @@ layout(push_constant) uniform Push
    vec4 OriginalSize;
    vec4 SourceSize;
    uint FrameCount;
-   float ntsc_phase;   
+   float ntsc_phase;
    float auto_res;
    float ntsc_sharp;
    float ntsc_charp;
@@ -18,6 +18,7 @@ layout(push_constant) uniform Push
    float ntsc_shape;
    float ntsc_gamma;
    float ntsc_rainbow1;
+   float speedup;
 } params;
 
 layout(std140, set = 0, binding = 0) uniform UBO
@@ -26,13 +27,15 @@ layout(std140, set = 0, binding = 0) uniform UBO
 } global;
 
 #pragma parameter auto_res "          SNES/Amiga Hi-Res Auto Mode" 0.0 0.0 1.0 1.0
+#pragma parameter speedup  "          Speedup w. higher Internal Res." 1.0 1.0 4.0 1.0
 float auto_rez = mix(1.0, 0.5, clamp(params.auto_res * round(params.OriginalSize.x/300.0)-1.0, 0.0, 1.0));
+#define speedup params.speedup
 
-#pragma parameter ntsc_phase   "NTSC Phase: Auto | 2 phase | 3 phase | Mixed" 1.0 1.0 4.0 1.0
+#pragma parameter ntsc_phase   "NTSC Phase: Auto | 2 phase | 3 phase | Mixed" 1.0 1.0 5.0 1.0
 #pragma parameter ntsc_rainbow1 "NTSC Coloring/Rainbow Effect (2-phase)"  0.0 0.0 3.0 1.0
 
 #pragma parameter ntsc_sharp  "NTSC Sharpness (Adaptive)" 0.0 -10.0 10.0 0.50
-#pragma parameter ntsc_shape  "NTSC Sharpness Shape" 0.80 0.5 1.0 0.05
+#pragma parameter ntsc_shape  "NTSC Sharpness Shape" 0.80 0.5 1.0 0.025
 #pragma parameter ntsc_charp  "NTSC Preserve 'Edge' Colors 2-phase" 0.0 0.0 10.0 0.50
 #pragma parameter ntsc_charp3 "NTSC Preserve 'Edge' Colors 3-phase" 0.0 0.0 10.0 0.50
 #pragma parameter ntsc_gamma  "NTSC Filtering Gamma Correction" 1.0 0.25 2.5 0.025
@@ -42,15 +45,21 @@ float auto_rez = mix(1.0, 0.5, clamp(params.auto_res * round(params.OriginalSize
 layout(location = 0) in vec4 Position;
 layout(location = 1) in vec2 TexCoord;
 layout(location = 0) out vec2 vTexCoord;
+layout(location = 1) out vec2 vTexCoord0;
+layout(location = 2) out vec2 vTexCoord1;
 
 void main()
 {
    gl_Position = global.MVP * Position;
-   vTexCoord = TexCoord - vec2(0.25 * (params.OriginalSize.z/auto_rez)/4.0, 0.0); // Compensate for decimate-by-2.
+   vTexCoord0 = TexCoord / vec2(speedup, 1.0);
+   vTexCoord1 = (floor(vTexCoord0*params.OriginalSize.xy)+0.5)*params.OriginalSize.zw;   
+   vTexCoord  = (TexCoord + vec2(0.5 * (params.OriginalSize.z/auto_rez)/4.0, 0.0)); // Compensate for decimate-by-2.
 }
 
 #pragma stage fragment
 layout(location = 0) in vec2 vTexCoord;
+layout(location = 1) in vec2 vTexCoord0;
+layout(location = 2) in vec2 vTexCoord1;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 2) uniform sampler2D Source;
 layout(set = 0, binding = 3) uniform sampler2D NPass1;
@@ -84,24 +93,34 @@ float smothstep (float e0, float e1, float x)
 
 void main()
 {
-   vec2 xx = vec2(0.50 * params.OriginalSize.z/auto_rez, 0.0);
-   vec2 dx = vec2(0.25 * params.OriginalSize.z/auto_rez/4.0, 0.0);
+
+if (speedup > 1.25 && ((params.OriginalSize.y > 500.0 && params.SourceSize.y > 820.0) || params.SourceSize.y > 820.0))
+{
+   vec3 signal = texture(Source, vTexCoord0).xyz;
+   signal.x = pow(signal.x, 1.0/params.ntsc_gamma);   
+   FragColor = vec4(clamp(yiq2rgb(signal), 0.0, 1.0), 1.0);
+}
+else
+{
+
+   vec2 xx = vec2(0.5000 * params.OriginalSize.z/auto_rez/speedup, 0.0);
+   vec2 dx = vec2(0.0625 * params.OriginalSize.z/auto_rez/speedup, 0.0);
    
    vec2 texcoord0 = (floor(params.OriginalSize.xy * vTexCoord) + 0.5)*params.OriginalSize.zw;
-   float texcoordx = params.OriginalSize.x * (vTexCoord.x+dx.x) - 0.5;   
-   float fpx = fract(texcoordx);
-   texcoordx = (floor(texcoordx ) + 0.5) * params.OriginalSize.z;
-   vec2 texcoord = vTexCoord + dx;
+   vec2 texcoord  = vTexCoord - 2.0*dx;
+   vec2 vTex = vTexCoord;
+   
+   if (speedup > 1.25) { texcoord0 = vTexCoord1; texcoord = vTexCoord0; vTex = vTexCoord0; }
    
    vec3 l1  = texture(Source, texcoord + xx).xyz;
    vec3 l2  = texture(Source, texcoord - xx).xyz;
 
    float dy = 0.0;
 
-   xx = vec2(params.OriginalSize.z/auto_rez, 0.0);
+   xx = vec2(params.OriginalSize.z/auto_rez/speedup, 0.0);
 
    float phase = (params.ntsc_phase < 1.5) ? ((params.OriginalSize.x * auto_rez > 300.0) ? 2.0 : 3.0) : ((params.ntsc_phase > 2.5) ? 3.0 : 2.0);
-   if (params.ntsc_phase == 4.0) phase = 3.0;
+   if (params.ntsc_phase > 3.5) phase = 3.0;
 
    float ca = texture(NPass1, texcoord0 - xx - xx).a;
    float c0 = texture(NPass1, texcoord0 - xx).a;
@@ -113,24 +132,27 @@ void main()
    float line0  = smothstep(th, 0.0, min(abs(c1-c0),abs(c2-c1)));
    float line1  = max(smothstep(th, 0.0, min(abs(ca-c0),abs(c2-cb))), line0);
    float line2  = max(smothstep(th, 0.0, min(abs(ca-c2),abs(c0-cb))), line1);
+
+   vec3 ref = texture(Source, texcoord).xyz;
+   vec2 orig = ref.yz;
    
    if (params.ntsc_rainbow1 > 0.5 && phase < 2.5)
    {
-      float ybool = 1.0; bool ybool1 = (c0 == c1 && c1 == c2);
+      float ybool = 1.0;
       if ((params.ntsc_rainbow1 < 1.5) && bool(line0)) ybool = 0.0; else
-      if ((params.ntsc_rainbow1 < 2.5) && bool(line2)) ybool = 0.0; else 
-      if (ybool1) ybool = 0.0;
+      if ((params.ntsc_rainbow1 < 2.5) && bool(line2)) ybool = 0.0; 
       float line_no  = floor(mod(params.OriginalSize.y*vTexCoord.y, 2.0));
       float frame_no = floor(mod(float(params.FrameCount),2.0));
       float ii = abs(line_no-frame_no);
       dy = ii * params.OriginalSize.w*ybool;
+      vec2 ref1 = texture(Source, texcoord - vec2(0.0, dy)).yz;
+      vec2 ref2 = texture(Source, texcoord + vec2(0.0, dy)).yz;
+      vec2 rdf1 = abs(orig-ref1); vec2 rdf2 = abs(orig-ref2);
+      rdf1 = rdf1/max(rdf1+rdf2,0.0000001);
+      ref.yz = mix(ref1,ref2,rdf1);
    }
    
-   vec3 ref = texture(Source, texcoord).xyz;
-   vec2 orig = ref.yz;
-   ref.yz = texture(Source, texcoord + vec2(0.0, dy)).yz;
-   
-   float lum1 = min(texture(NPass1, vTexCoord - dx).a, texture(NPass1, vTexCoord + dx).a);
+   float lum1 = min(texture(NPass1, vTex - dx).a, texture(NPass1, vTex + dx).a);
    float lum2 = ref.x;
    vec3 l3 = abs(l1-l2);
    
@@ -165,22 +187,23 @@ void main()
 
    if ((params.ntsc_charp + params.ntsc_charp3) > 0.25)
    {
+      dx.x = 0.0625 * params.OriginalSize.z/auto_rez;
+      float texcoordx = params.OriginalSize.x * (vTexCoord.x+dx.x) - 0.5;   
+      float fpx = fract(texcoordx);
+      texcoordx = (floor(texcoordx ) + 0.5) * params.OriginalSize.z;
       float mixer = sweight;
       if (params.ntsc_sharp > 0.25) mixer = sweighr;
       mixer = mix(smothstep(0.075,0.125,max(l3.y,l3.z)), smothstep(0.015,0.0275,dif), line2)*mixer; 
       mixer*=0.1*((phase < 2.5) ? params.ntsc_charp : params.ntsc_charp3);
       texcoord = vec2(texcoordx,texcoord.y);
-      vec3 orig_ch = rgb2yiq(mix(texture(PrePass0, texcoord).rgb , texture(PrePass0, texcoord+xx).rgb, clamp(1.5*fpx-0.25,0.0,1.0)));
+      vec3 orig_ch = rgb2yiq(mix(texture(PrePass0, texcoord).rgb , texture(PrePass0, texcoord+16.0*dx).rgb, clamp(1.5*fpx-0.25,0.0,1.0)));
       signal.yz = mix(signal.yz, orig_ch.yz, mixer);
-   }
-
-   if (params.ntsc_rainbow1 == 2.0 && phase < 2.5)
-   {
-      signal.yz = mix(signal.yz, orig, sweighr);
    }
    
    signal.x = pow(signal.x, 1.0/params.ntsc_gamma);
    signal = clamp(yiq2rgb(signal), 0.0, 1.0);
+   sweighr = (phase == 2.0 || params.ntsc_phase > 3.5) ? sweighr : 1.0;
    
-   FragColor = vec4(signal, 1.0);
+   FragColor = vec4(signal, sweighr);
+}
 }  

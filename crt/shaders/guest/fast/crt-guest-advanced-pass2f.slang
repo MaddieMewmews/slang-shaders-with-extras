@@ -741,12 +741,13 @@ if ( mshift > 0.25 )
 	maskcoord = maskcoord0/masksize;
 
 if ( !zoomed )	
-	cmask*= Mask(floor(maskcoord), mx);
+	cmask = Mask(floor(maskcoord), mx);
 else{
 	mscale  = mwidth1/mwidth;
 	float mlerp = fract(maskcoord.x/mscale); if (mzoom_sh > 0.025) mlerp = clamp((1.0 + mzoom_sh)*mlerp - 0.5*mzoom_sh, 0.0, 1.0);
-	float mcoord = floor(maskcoord.x/mscale); if (shadowMask == 12.0 && mask_zoom == -2.0) mcoord = ceil(maskcoord.x/mscale);
-	cmask*=mix(Mask(vec2(mcoord,maskcoord.y), mx), Mask(vec2(mcoord + 1.0, maskcoord.y), mx), mlerp);
+	float mcoord = floor(maskcoord.x/mscale);
+	if (shadowMask == 12.0 && mask_zoom == -2.0) mcoord = ceil(maskcoord.x/mscale);
+	cmask = mix(Mask(vec2(mcoord,maskcoord.y), mx), Mask(vec2(mcoord + 1.0, maskcoord.y), mx), mlerp);
 }
 
 	if (slotwidth > 0.5) swidth = slotwidth; float smask = 1.0;
