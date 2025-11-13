@@ -1,17 +1,25 @@
 #version 450
+#pragma parameter u_gamma "Gamma" 1.0 0.5 3.0 0.05
 
 layout(push_constant) uniform Push
 {
-	vec4 SourceSize;
-	vec4 OriginalSize;
-	vec4 OutputSize;
-	uint FrameCount;
+float u_gamma;
 } params;
 
 layout(std140, set = 0, binding = 0) uniform UBO
 {
 	mat4 MVP;
+	vec4 SourceSize;
+	vec4 OriginalSize;
+	vec4 OutputSize;
+	uint FrameCount;
 } global;
+
+#define SourceSize global.SourceSize
+#define OriginalSize global.OriginalSize
+#define OutputSize global.OutputSize
+#define FrameCount global.FrameCount
+#define u_gamma params.u_gamma
 
 #pragma stage vertex
 layout(location = 0) in vec4 Position;
@@ -31,6 +39,6 @@ layout(set = 0, binding = 2) uniform sampler2D Source;
 
 void main()
 {
-	vec4 res = vec4(texture(Source, vTexCoord).rgb, 1.0);
-   FragColor = res*res;
+	vec3 res = texture(Source, vTexCoord).rgb;
+   FragColor.rgb = pow(res,vec3(u_gamma));
 }
