@@ -245,8 +245,8 @@ vec2 get_scanlines_texel_coordinate(vec2 pix_coord, vec2 tex_size, vec2 multiple
     float scanlines_offset = PARAM_SCANLINES_OFFSET > 0.0
         // fixed offset
         ? PARAM_SCANLINES_OFFSET
-        // jitter offset each 2nd frame with 60fps
-        : mod(GetUniformFrameCount(60), 2) > 0.0
+        // jitter offset each 2nd frame with 30/60Hz
+        : mod(GetUniformFrameCount(PARAM_SCREEN_FREQUENCY), 2) > 0.0
             ? 0.0
             : abs(PARAM_SCANLINES_OFFSET);
 
@@ -325,20 +325,22 @@ vec3 get_mask(vec2 tex_coord)
 {
     vec2 pix_coord = vec2o(tex_coord * global.OutputSize.xy);
 
-    // change subpixel type 1 to 2 and swap subpixel colors from 2-MG to 1-BY
-    int subpixel_type = PARAM_MASK_SUBPIXEL < 2.0
-        ? int(PARAM_MASK_SUBPIXEL + 1)
-        : int(PARAM_MASK_SUBPIXEL);
-    bool subpixel_color_swap = PARAM_MASK_SUBPIXEL < 2.0;
-
-    float subpixel_mask = PARAM_MASK_TYPE;
-    float subpixel_size = INPUT_MASK_PROFILE.x;
+    int subpixel_type = int(PARAM_MASK_SUBPIXEL);
+    int subpixel_mask = int(PARAM_MASK_TYPE);
+    int subpixel_size = int(INPUT_MASK_PROFILE.x);
     float subpixel_smoothness = INPUT_MASK_PROFILE.y;
+    bool subpixel_color_swap =
+        // magenta, green to blue, yellow
+        subpixel_type == 1;
+    subpixel_type =
+        // black, white to magenta, green
+        subpixel_type == 1 ? subpixel_type + 1 :
+        subpixel_type;
 
     vec3 mask = get_subpixel_color(
         pix_coord,
-        int(subpixel_size),
-        int(subpixel_mask),
+        subpixel_size,
+        subpixel_mask,
         subpixel_type,
         subpixel_color_swap,
         1.0,
@@ -418,7 +420,7 @@ vec3 apply_noise(vec3 color, float color_luma, vec2 tex_coord)
     // scale noise based on mask's sub-pixel size
     pix_coord = floor(pix_coord / int(subpixel_size)) * int(subpixel_size);
 
-    // repeat every 20 frames with 12fps
+    // repeat every 20 frames with 12Hz
     float frame = mod(GetUniformFrameCount(12), 20);
     float noise = random(pix_coord * (frame + 1.0));
 
