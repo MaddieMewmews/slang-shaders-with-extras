@@ -16,21 +16,18 @@ Originally part of the crt\crt-sony-pvm-4k-hdr.slangp but can be used for any sh
 
 layout(push_constant) uniform Push
 {
-	vec4 SourceSize;
-	vec4 OriginalSize;
-	vec4 OutputSize;
-	uint FrameCount;
-   float PaperWhiteNits;
-   float ExpandGamut;
+   float ColourSpace;
 } params;
-
-#pragma parameter PaperWhiteNits    "Paper White Luminance"    200.0    0.0 10000.0 10.0
-#pragma parameter ExpandGamut       "ExpandGamut"              1.0      0.0 1.0     1.0
 
 layout(std140, set = 0, binding = 0) uniform UBO
 {
 	mat4 MVP;
+	float EnableHDR;
+	float PaperWhiteNits;
+	float ExpandGamut;
 } global;
+
+#pragma parameter ColourSpace       "Colour Space: r709 | DCI-P3 | NTSC | PAL| Adobe"    1.0      0.0   4.0   1.0
 
 #pragma stage vertex
 layout(location = 0) in vec4 Position;
@@ -51,6 +48,14 @@ layout(set = 0, binding = 2) uniform sampler2D Source;
 void main()
 {
    vec4 hdr_linear = texture(Source, vTexCoord);
-   FragColor = vec4(Hdr10(hdr_linear.rgb, params.PaperWhiteNits, params.ExpandGamut), hdr_linear.a); 
+
+   if(global.EnableHDR >= 1.0f)
+   {
+      FragColor = vec4(Hdr10(hdr_linear.rgb, global.PaperWhiteNits, global.ColourSpace, global.ExpandGamut), hdr_linear.a); 
+   }
+   else
+   {
+      FragColor = hdr_linear; 
+   }
 }
 

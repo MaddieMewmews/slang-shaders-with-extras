@@ -31,10 +31,17 @@ layout(push_constant) uniform Push
 {
    // User Settings
    float hcrt_hdr;
-   float hcrt_new;
    float hcrt_max_nits;
    float hcrt_paper_white_nits;
    float hcrt_expand_gamut;
+   float hcrt_colour_space;
+	
+   float hcrt_r709_gamma_out;
+   float hcrt_srgb_gamma_out;
+   float hcrt_p3_gamma_out;
+   float hcrt_adobe_gamma_out;
+   float hcrt_r709_gamma_cutoff;
+   float hcrt_srgb_gamma_cutoff;
 } params;
 
 layout(std140, set = 0, binding = 0) uniform UBO
@@ -56,54 +63,13 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #define HCRT_MAX_NITS                       global.MaxNits
 #define HCRT_PAPER_WHITE_NITS               global.PaperWhiteNits
 #define HCRT_EXPAND_GAMUT                   global.ExpandGamut
+#define HCRT_OUTPUT_COLOUR_SPACE            params.hcrt_colour_space
 
-#define COMPAT_TEXTURE(c, d) texture(c, d)
+#define HCRT_R709_GAMMA_OUT                 params.hcrt_r709_gamma_out
+#define HCRT_SRGB_GAMMA_OUT                 params.hcrt_srgb_gamma_out
+#define HCRT_P3_GAMMA_OUT                   params.hcrt_p3_gamma_out
+#define HCRT_ADOBE_GAMMA_OUT                params.hcrt_adobe_gamma_out
+#define HCRT_R709_GAMMA_CUTOFF              params.hcrt_r709_gamma_cutoff
+#define HCRT_SRGB_GAMMA_CUTOFF              params.hcrt_srgb_gamma_cutoff
 
-#pragma stage vertex
-layout(location = 0) in vec4 Position;
-layout(location = 1) in vec2 TexCoord;
-layout(location = 0) out vec2 vTexCoord;
-
-void main()
-{
-   gl_Position = global.MVP * Position;
-   vTexCoord = TexCoord * vec2(1.00001);  // To resolve rounding issues when sampling
-}
-
-#pragma stage fragment
-layout(location = 0) in vec2 vTexCoord;
-layout(location = 0) out vec4 FragColor;
-layout(set = 0, binding = 2) uniform sampler2D Source;
-
-#include "include/inverse_tonemap.h"
-#include "include/hdr10.h"
-
-void main()
-{
-   vec3 source = COMPAT_TEXTURE(Source, vTexCoord).rgb;
-
-   vec3 hdr_colour;
-   
-   if(HCRT_HDR < 1.0f)
-   {
-      hdr_colour = source;
-   }
-   else
-   {
-      hdr_colour = InverseTonemap(source, HCRT_MAX_NITS, HCRT_PAPER_WHITE_NITS);
-   }
-
-   vec3 transformed_colour;
-
-   if(HCRT_HDR >= 1.0f)
-   {
-      const vec3 rec2020  = hdr_colour * k2020Gamuts[uint(HCRT_EXPAND_GAMUT)];
-      transformed_colour  = rec2020 * (HCRT_PAPER_WHITE_NITS / kMaxNitsFor2084);
-   }
-   else
-   {      
-      transformed_colour = hdr_colour;
-   }
-
-   FragColor = vec4(transformed_colour, 1.0);
-}
+#include "include/hdr_pass_v2.h"
