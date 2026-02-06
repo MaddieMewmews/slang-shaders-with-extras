@@ -1,7 +1,7 @@
 #version 450
 
 /*
-   Interlacing
+   Interlace Pass
    
    Copyright (C) 2020 - 2025 guest(r)
 
@@ -26,15 +26,11 @@ layout(push_constant) uniform Push
 	vec4 OriginalSize;
 	vec4 OutputSize;
 	uint FrameCount;
-	float GAMMA_INPUT;
 	float inter;
 	float interm;
 	float iscan;
 	float intres;
 	float iscans;
-	float downsample_levelx;
-	float downsample_levely;
-	float gamma_out;
 	float hiscan;
 } params;
 
@@ -45,13 +41,6 @@ layout(std140, set = 0, binding = 0) uniform UBO
 	mat4 MVP;
 } global;
 
-#pragma parameter bogus_gamma "[ GAMMA OPTIONS ]: " 0.0 0.0 0.0 1.0
-
-#pragma parameter GAMMA_INPUT "          Gamma Input" 2.0 1.0 5.0 0.05
-#define GAMMA_INPUT params.GAMMA_INPUT
-
-#pragma parameter gamma_out "          Gamma out" 1.95 1.0 5.0 0.05
-#define gamma_out    params.gamma_out     // output gamma
 
 #pragma parameter bogus_interlacing "[ INTERLACING OPTIONS ]: " 0.0 0.0 0.0 1.0
 
@@ -67,14 +56,11 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #pragma parameter info02 "INFO --> Internal Resolution Y: 1.0 - Smart Scanline Mode" 0.0 0.0 1.0 1.0
 
 #pragma parameter intres "          Internal Resolution Y: 0.5...y-dowsample divider" 0.0 0.0 10.0 0.5 // Joint parameter with main pass, values must match
-
 #define intres         params.intres     // interlace resolution
 
-#pragma parameter downsample_levelx "          Downsampling-X (High-res content, pre-scalers)" 0.0 0.0 2.0 0.05
-#define downsample_levelx         params.downsample_levelx     // downsample level
+#pragma parameter downsample_levelx "          Downsampling-X (High-res content, pre-scalers)" 0.0 0.0 3.0 0.05
 
-#pragma parameter downsample_levely "          Downsampling-Y (High-res content, pre-scalers)" 0.0 0.0 2.0 0.05
-#define downsample_levely         params.downsample_levely     // downsample level
+#pragma parameter downsample_levely "          Downsampling-Y (High-res content, pre-scalers)" 0.0 0.0 3.0 0.05
 
 #pragma parameter iscans "          Interlacing (Scanline) Saturation" 0.25 0.0 1.0 0.05
 #define iscans        params.iscans     // interlace saturation
@@ -97,7 +83,7 @@ void main()
 #pragma stage fragment
 layout(location = 0) in vec2 vTexCoord;
 layout(location = 0) out vec4 FragColor;
-layout(set = 0, binding = 2) uniform sampler2D NtscPass;
+layout(set = 0, binding = 2) uniform sampler2D Source;
 
 #define COMPAT_TEXTURE(c,d) texture(c,d)
 
@@ -108,44 +94,14 @@ vec3 plant (vec3 tar, float r)
 	return tar * r / t;
 }
 
-
-vec3 fetch_pixel(vec2 coord)
-{
-	vec2 dx = vec2(global.SourceSize.z, 0.0) * downsample_levelx;
-	vec2 dy = vec2(0.0, global.SourceSize.w) * downsample_levely;	
-	vec2 d1 = dx + dy;
-	vec2 d2 = dx - dy;
-	
-	float sum = 15.0;
-	vec3 result = 3.0*COMPAT_TEXTURE(NtscPass, coord     ).rgb + 
-	              2.0*COMPAT_TEXTURE(NtscPass, coord + dx).rgb +
-	              2.0*COMPAT_TEXTURE(NtscPass, coord - dx).rgb +
-	              2.0*COMPAT_TEXTURE(NtscPass, coord + dy).rgb +
-	              2.0*COMPAT_TEXTURE(NtscPass, coord - dy).rgb +
-	              COMPAT_TEXTURE(NtscPass, coord + d1).rgb +
-	              COMPAT_TEXTURE(NtscPass, coord - d1).rgb +
-	              COMPAT_TEXTURE(NtscPass, coord + d2).rgb +
-	              COMPAT_TEXTURE(NtscPass, coord - d2).rgb;  
-				  
-	return result/sum;
-}
-
-
 void main()
 {
-	vec3 c1 = COMPAT_TEXTURE(NtscPass, vTexCoord).rgb;
-	vec3 c2 = COMPAT_TEXTURE(NtscPass, vTexCoord + vec2(0.0, params.OriginalSize.w)).rgb;
-	
-	if ((downsample_levelx + downsample_levely) > 0.025)
-	{
-		c1 = fetch_pixel(vTexCoord);
-		c2 = fetch_pixel(vTexCoord + vec2(0.0, params.OriginalSize.w));	
-	}
+	vec3 c1 = COMPAT_TEXTURE(Source, vTexCoord).rgb;
+	vec3 c2 = COMPAT_TEXTURE(Source, vTexCoord + vec2(0.0, params.OriginalSize.w)).rgb;
 	
 	vec3  c  = c1;
 
 	float intera = 1.0;
-	float gamma_in = GAMMA_INPUT;
 
 	float m1 = max(max(c1.r,c1.g),c1.b);
 	float m2 = max(max(c2.r,c2.g),c2.b);
@@ -182,9 +138,6 @@ void main()
 		
 		if (hscan) c = c1;		
 	}
-	c = pow(c, vec3(gamma_in));
-	
-	if (vTexCoord.x > 0.5) gamma_in = intera; else gamma_in = 1.0/gamma_in;
-	
-	FragColor = vec4(c, gamma_in);
+
+	FragColor = vec4(c, intera);
 }

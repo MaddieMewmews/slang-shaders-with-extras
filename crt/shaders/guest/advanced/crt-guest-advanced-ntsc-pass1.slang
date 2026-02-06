@@ -52,7 +52,7 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #pragma parameter bogus_filtering "[ FILTERING OPTIONS ]: " 0.0 0.0 1.0 1.0
 
 #pragma parameter auto_res "          SNES/Amiga Hi-Res Auto Mode" 0.0 0.0 1.0 1.0
-float auto_rez = mix(1.0, 1.85, clamp(params.auto_res * round(params.OriginalSize.x/300.0)-1.0, 0.0, 1.0));
+float auto_rez = (params.OriginalSize.y < 375.0) ? mix(1.0, 1.85, clamp(params.auto_res * round(params.OriginalSize.x/300.0)-1.0, 0.0, 1.0)) : 1.0;
 
 #pragma parameter HSHARPNESS "          Horizontal Filter Range" 1.60 1.0 8.0 0.05
 #define HSHARPNESS params.HSHARPNESS

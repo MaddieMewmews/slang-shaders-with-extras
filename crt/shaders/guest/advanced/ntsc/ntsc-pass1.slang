@@ -31,8 +31,9 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #pragma parameter cust_fringing "NTSC Fringing Value" 1.0 0.0 5.0 0.1
 #pragma parameter ntsc-row2 "------------------------------------------------" 0.0 0.0 0.0 1.0
 #pragma parameter ntsc_fields "NTSC Merge Fields: Auto | NO | YES" -1.0 -1.0 1.0 1.0
-#pragma parameter ntsc_phase  "NTSC Phase: Auto | 2 phase | 3 phase | Mixed" 1.0 1.0 5.0 1.0
+#pragma parameter ntsc_phase  "NTSC Phase: Auto | 2 phase | 3 phase | Mixed | PCE" 1.0 1.0 5.0 1.0
 #pragma parameter ntsc_scale  "NTSC Resolution Scaling" 1.0 0.20 2.5 0.025
+#pragma parameter nscale      "NTSC Filter Scaling" 1.0 0.20 2.5 0.025
 #pragma parameter ntsc_sat    "NTSC Color Saturation" 1.0 0.0 2.0 0.01
 #pragma parameter ntsc_bright "NTSC Brightness" 1.0 0.0 1.5 0.01
 #pragma parameter ntsc_gamma  "NTSC Filtering Gamma Correction" 1.0 0.25 2.5 0.025
@@ -71,9 +72,9 @@ void main()
 	pix_no = vTexCoord * params.OriginalSize.xy * vec2(res, res/auto_rez) * vec2(4.0, 1.0);
 	
 	phase = (params.ntsc_phase < 1.5) ? ((OriginalSize > 300.0) ? 2.0 : 3.0) : ((params.ntsc_phase > 2.5) ? 3.0 : 2.0);
-	if (params.ntsc_phase > 3.5) phase = 3.0;
+	if (params.ntsc_phase == 4.0) phase = 3.0; else if (params.ntsc_phase == 5.0) phase = 2.0;
 	
-	CHROMA_MOD_FREQ = (phase < 2.5) ? (4.0 * PI / 15.0) : (PI / 3.0);
+	CHROMA_MOD_FREQ = (phase == 2.0 && params.ntsc_phase != 5.0) ? (4.0 * PI / 15.0) : ((OriginalSize <= 300.0 || phase == 3.0) ? (PI / 3.0) : (PI/2.0));
 	ARTIFACTING = params.cust_artifacting;
 	FRINGING = params.cust_fringing;
 	SATURATION = params.ntsc_sat;
@@ -97,7 +98,8 @@ layout(location = 8) in float MERGE;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 2) uniform sampler2D Source;
 
-#define mix_mat  mat3(BRIGHTNESS, FRINGING, FRINGING, ARTIFACTING, 2.0 * SATURATION, 0.0, ARTIFACTING, 0.0, 2.0 * SATURATION)
+mat3 mix_mat = mat3(BRIGHTNESS, FRINGING, FRINGING, ARTIFACTING, 2.0*SATURATION, 0.0, ARTIFACTING, 0.0, 2.0*SATURATION);
+
 
 const mat3 yiq2rgb_mat = mat3(
    1.0, 0.956, 0.6210,
@@ -130,6 +132,7 @@ float smothstep (float e0, float e1, float x)
    return clamp((x - e0) / (e1 - e0), 0.0, 1.0);
 }
 
+
 void main()
 {
 if (vTexCoord.x > 1.0) FragColor = 0.0.xxxx; else
@@ -155,10 +158,12 @@ if (params.ntsc_phase == 4.0)
    c2 = pow(c2, params.ntsc_gamma);
    yiq.x = mix(min(0.5*(yiq.x + max(c1,c2)), max(yiq.x , min(c1,c2))), yiq.x, mix01);
 }   
+
+   vec3 tmp =  yiq; 
    vec3 yiq2 = yiq;	
    vec3 yiqs = yiq;
    vec3 yiqz = yiq;
-   vec3 tmp =  yiq;
+
 
 if (MERGE > 0.5)
 {

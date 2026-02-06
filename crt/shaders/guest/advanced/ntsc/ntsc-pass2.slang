@@ -19,6 +19,7 @@ layout(push_constant) uniform Push
    float ntsc_charp;
    float ntsc_charp3;
    float speedup;
+   float nscale;
 } params;
 
 layout(std140, set = 0, binding = 0) uniform UBO
@@ -29,7 +30,8 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #pragma parameter auto_res "          SNES/Amiga Hi-Res Auto Mode" 0.0 0.0 1.0 1.0
 #pragma parameter speedup  "          Speedup w. higher Internal Res." 1.0 1.0 4.0 1.0
 #pragma parameter ntsc_scale   "NTSC Resolution Scaling" 1.0 0.20 2.5 0.025
-#pragma parameter ntsc_phase   "NTSC Phase: Auto | 2 phase | 3 phase | Mixed" 1.0 1.0 5.0 1.0
+#pragma parameter nscale       "NTSC Filter Scaling" 1.0 0.20 2.5 0.025
+#pragma parameter ntsc_phase   "NTSC Phase: Auto | 2 phase | 3 phase | Mixed | PCE" 1.0 1.0 5.0 1.0
 #pragma parameter ntsc_taps    "NTSC # of Taps (Filter Width)" 32.0 6.0 48.0 1.0
 #pragma parameter ntsc_cscale  "NTSC Chroma Scaling / Bleeding (2-phase)" 1.0 0.50 4.00 0.05
 #pragma parameter ntsc_cscale1 "NTSC Chroma Scaling / Bleeding (3-phase)" 1.0 0.20 2.25 0.05
@@ -41,6 +43,7 @@ layout(std140, set = 0, binding = 0) uniform UBO
 float auto_rez = mix(1.0, 0.5, clamp(params.auto_res * round(params.OriginalSize.x/300.0)-1.0, 0.0, 1.0));
 #define ntsc_scale params.ntsc_scale * auto_rez
 #define speedup params.speedup
+#define nscale params.nscale;
 
 #pragma stage vertex
 layout(location = 0) in vec4 Position;
@@ -216,7 +219,7 @@ float luma_filter_3_phase[33] = float[33](
    0.175261268,
    0.220176552);
 
-   float res = ntsc_scale;
+   float res = ntsc_scale * nscale;
    float OriginalSize = params.OriginalSize.x * auto_rez; 
    vec2 one_x = 0.25*params.OriginalSize.zz / res / speedup;
    vec3 signal = vec3(0.0);
@@ -237,7 +240,7 @@ float luma_filter_3_phase[33] = float[33](
       float ltap = iloop + 1.0;
       float cs_sub = iloop - iloop / params.ntsc_cscale;
       float ctap = 0.0;
-      float mit = 1.0 + 0.0375*pow(smothstep(16.0, 8.0, iloop), 0.5);
+      float mit = 1.0 + 0.04*pow(smothstep(16.0, 8.0, iloop), 0.5);
       vec2 dx = vec2(one_x.x*mit, 0.0); vec2 dx1 = dx;
 	  
       for (i = loopstart; i < 32; i++)
@@ -260,13 +263,13 @@ float luma_filter_3_phase[33] = float[33](
       vec3 dx = vec3(one_x.x, one_x.y, 0.0);
       float mit = 1.0;
       float iloop = min(params.ntsc_taps, TAPS_3_phase);
-      if (params.ntsc_phase > 3.5) { iloop = max(iloop, 8.0); mit = 1.0 + 0.0375*pow(smothstep(16.0, 8.0, iloop), 0.5); }
+      if (params.ntsc_phase > 3.5) { iloop = max(iloop, 8.0); mit = 1.0 + 0.04*pow(smothstep(16.0, 8.0, iloop), 0.5); }
       vec3 dx1 = dx; dx.x*=mit;
       int loopstart = int(32.0 - iloop);
 	  
       for (i = loopstart; i < 32; i++)
       {
-         offset = float(i-loopstart); j = offset + 1.0; dx1.xy = (offset - iloop)*dx.xy;
+         offset = float(i-loopstart); dx1.xy = (offset - iloop)*dx.xy;
          sums = fetch_offset3(dx1);
          tmp = vec3(luma_filter_3_phase[i], chroma_filter_3_phase[i].xx);
          wsum = wsum + tmp;
