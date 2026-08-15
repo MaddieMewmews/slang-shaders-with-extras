@@ -41,7 +41,6 @@ struct TimebaseConfig {
     float v_lines_per_field;
     float v_lines_per_frame;
     float is_interlaced;
-    float pixels_per_line;
 };
 
 // Phase normalization helper. Keeps phase bounded in [-PI, PI].
@@ -95,10 +94,10 @@ float compute_odd_field_time_adjustment(
 {
     if (shorten_odd_field_time < 0.5)
         return 0.0;
-    
+
     float odd_time_adjust = original_width / 256.0 * pixel_time;
     float adjustment = 0.0;
-    
+
     if (is_ntsc) {
         // NTSC: Apply shortening only for progressive scan
         if (!is_interlaced) {
@@ -111,7 +110,7 @@ float compute_odd_field_time_adjustment(
             adjustment = odd_time_adjust;
         }
     }
-    
+
     return ceil(field / 2.0) * adjustment;
 }
 
@@ -221,6 +220,7 @@ float compute_v_lines_per_field(
 }
 
 // Detect interlacing and video standard type
+// If both is_ntsc and is_pal are false, it's something else, like VGA
 void detect_scan_mode(
     float original_height, float v_lines_per_field,
     float core_refresh_hz,
@@ -261,62 +261,57 @@ void compute_h_timing(
 {
     float total_cycles = pixel_clock_hz / h_freq_hz;
     float fuzz_frac = h_blank_fuzz / 100.0;
-    float clock_factor = round(total_cycles * fuzz_frac / original_width);
+    float clock_factor = max(1.0, round(total_cycles * fuzz_frac / original_width));
     total_pixels = total_cycles / clock_factor;
-    pixel_time = 1.0 / (h_freq_hz * total_pixels);
+    // Simplify: pixel_time = 1.0 / (h_freq_hz * total_pixels) = clock_factor / pixel_clock_hz
+    pixel_time = clock_factor / pixel_clock_hz;
 }
 
 // Compute output scaling factors for both horizontal and vertical dimensions
 void compute_scale_factors(
-    float frame_width, float frame_height,
+    float frame_width,
     float output_width, float output_height,
     float total_pixels, float v_lines_per_field,
-    out float h_scale, out float v_scale)
+    out float h_scale)
 {
     float h_scale1 = floor(frame_width / total_pixels);
-    float v_scale1 = floor(frame_height / v_lines_per_field);
 
     float h_scale2 = floor(output_width / (total_pixels * h_scale1));
-    float v_scale2 = floor(output_height / (v_lines_per_field * v_scale1));
 
     h_scale = max(h_scale1 * h_scale2, 1.0);
-    v_scale = max(v_scale1 * v_scale2, 1.0);
 }
 
 // Compute field phase with intelligent odd-field timing adjustment
 float compute_field_phase(
     float field, float h_freq_hz, float v_lines_per_field,
-    float v_freq, float sc_freq_hz, bool is_ntsc, 
+    float v_freq, float sc_freq_hz, bool is_ntsc,
     bool is_interlaced, float pixel_time, float original_width,
     float shorten_odd_field_time)
 {
-    float field_time = 1.0 / v_freq;
-    float phase = field_time * field * 2.0 * PI * sc_freq_hz;
+    // Derive field phase from discrete carrier cycles per line/field.
+    // This avoids long-term drift caused by reciprocal frequency accumulation.
+    float cycles_per_line = sc_freq_hz / h_freq_hz;
+    float cycles_per_field = v_lines_per_field * cycles_per_line;
 
-    // Apply odd-field timing adjustment based on standard and scan type
-    float odd_field_adjust = 0.0;
-    if (shorten_odd_field_time > 0.5) {
-        float odd_time_adjust = original_width / 256.0 * pixel_time;
+    // Convert odd-field timing adjustment (seconds) into carrier cycles.
+    float odd_field_adjust = compute_odd_field_time_adjustment(
+        field, shorten_odd_field_time,
+        pixel_time, original_width,
+        is_ntsc, is_interlaced);
+    float odd_cycles = odd_field_adjust * sc_freq_hz;
 
-        if (is_ntsc) {
-            // NTSC: Apply shortening only for progressive scan
-            if (!is_interlaced) {
-                odd_field_adjust = -odd_time_adjust;
-            }
-        } else {
-            // PAL: Different behavior based on scan type
-            if (is_interlaced) {
-                // Interlaced PAL: lengthen odd field
-                odd_field_adjust = odd_time_adjust;
-            }
-        }
-    }
+    // Progressive NTSC console path: stabilize phase against tiny floating-point drift.
+    // Quantize to 12-step cycle space, matching the field counter range used by timebase (0..11).
+    float frac_cycles_per_field = fract(cycles_per_field);
+    float frac_odd_cycles = fract(odd_cycles);
 
-    phase += ceil(field / 2.0) * odd_field_adjust * 2.0 * PI * sc_freq_hz;
-    return mod(phase, 2.0 * PI) - PI;
+    float cycles_per_field_q = floor(frac_cycles_per_field * 12.0 + 0.5) / 12.0;
+    float odd_cycles_q = floor(frac_odd_cycles * 12.0 + 0.5) / 12.0;
+
+    float phase_cycles_q = fract(field * cycles_per_field_q + odd_cycles_q);
+    return normalize_phase(2.0 * PI * phase_cycles_q);
 }
 
-// ============================================================================
 // Specialized timebase structs for different shader purposes
 // ============================================================================
 
@@ -331,13 +326,12 @@ struct FrameGeometry {
 };
 
 // Carrier phase and modulation (for composite/S-Video modulators and demodulators)
-// Contains: h_freq_hz, sc_freq_hz, pixel_time_px, field_phase, pixels_per_line, field
+// Contains: h_freq_hz, sc_freq_hz, pixel_time_px, field_phase, field
 struct CarrierPhaseConfig {
     float h_freq_hz;
     float sc_freq_hz;
     float pixel_time_px;
     float field_phase;
-    float pixels_per_line;
     float field;
 };
 
@@ -360,7 +354,6 @@ CarrierPhaseConfig extract_carrier_phase(TimebaseConfig tb) {
         tb.sc_freq_hz,
         tb.pixel_time_px,
         tb.field_phase,
-        tb.pixels_per_line,
         tb.field);
 }
 
@@ -415,7 +408,7 @@ FrameGeometry compute_frame_geometry(
 
     // Calculate frame dimensions
     geom.v_lines_per_frame = geom.v_lines_per_field * 2.0 + 2.0;
-    
+
     if (is_interlaced) {
         geom.v_lines_per_field += 0.5;
     }
@@ -423,7 +416,7 @@ FrameGeometry compute_frame_geometry(
     // Calculate horizontal pixels
     float total_cycles = pixel_clock_hz / h_freq_hz;
     float fuzz_frac = h_blank_fuzz / 100.0;
-    float clock_factor = round(total_cycles * fuzz_frac / original_size.x);
+    float clock_factor = max(1.0, round(total_cycles * fuzz_frac / original_size.x));
     geom.h_pixels = total_cycles / clock_factor;
 
     return geom;
@@ -440,7 +433,7 @@ TimebaseConfig compute_timebase(
     vec2 tex_coord,
     vec2 original_size,
     vec2 output_size,
-    vec2 frame_size,
+    float frame_width,
     float core_refresh_hz,
     float sc_freq_mode,
     float sc_freq_custom_mhz,
@@ -510,18 +503,16 @@ TimebaseConfig compute_timebase(
         shorten_odd_field_time);
 
     // === Scale factor derivation ===
-    float h_scale, v_scale;
+    float h_scale;
     compute_scale_factors(
-        frame_size.x, frame_size.y, output_size.x, output_size.y,
-        total_pixels, config.v_lines_per_field, h_scale, v_scale);
+        frame_width, output_size.x, output_size.y,
+        total_pixels, config.v_lines_per_field, h_scale);
 
     // Per-output-pixel time (cycles-per-pixel scaling)
     config.pixel_time_px = config.pixel_time / h_scale;
 
     // Total horizontal pixels (active + blanking)
     config.h_pixels = total_pixels;
-
-    config.pixels_per_line = v_scale;
 
     return config;
 }

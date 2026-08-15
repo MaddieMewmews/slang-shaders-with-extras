@@ -8,9 +8,9 @@
 #pragma stage vertex
 layout(location = 0) in vec4 Position;
 layout(location = 1) in vec2 TexCoord;
-layout(location = 0) out vec2 vTexCoord;
-layout(location = 1) out vec2 vFuzzy_main_pass_stage_1;
-layout(location = 5) out vec2 blur_radius_adpt;
+layout(location = 0) noperspective out vec2 vTexCoord;
+layout(location = 1) flat out vec2 vFuzzy_main_pass_stage_1;
+layout(location = 5) flat out vec2 blur_radius_adpt;
 
 
 void main() {
@@ -25,9 +25,9 @@ void main() {
 
 #pragma stage fragment
 
-layout(location = 0) in vec2 vTexCoord;
-layout(location = 1) in vec2 vFuzzy_main_pass_stage_1;
-layout(location = 5) in vec2 blur_radius_adpt;
+layout(location = 0) noperspective in vec2 vTexCoord;
+layout(location = 1) flat in vec2 vFuzzy_main_pass_stage_1;
+layout(location = 5) flat in vec2 blur_radius_adpt;
  
 layout(location = 0) out vec4 FragColor;
 
@@ -37,19 +37,23 @@ layout(set = 0, binding = 1) uniform sampler2D colortools_and_ntsc_pass;
 
 vec3 bloom_gamma_power2(sampler2D smp, vec2 uv, vec4 smpsize, float gamma) {
     const vec2 d = smpsize.zw;
-    vec3 color = vec3(0.0);
-    vec3 lookup;
-    const vec3 vec3gamma = vec3(gamma);
-    lookup = textureLod(smp, uv + vec2(-1,-1) * d, 0).rgb; color +=pow(lookup.rgb, vec3gamma);
-    lookup = textureLod(smp, uv + vec2(-1, 0) * d, 0).rgb; color +=pow(lookup.rgb, vec3gamma);
-    lookup = textureLod(smp, uv + vec2(-1,+1) * d, 0).rgb; color +=pow(lookup.rgb, vec3gamma);
-    lookup = textureLod(smp, uv + vec2( 0,-1) * d, 0).rgb; color +=pow(lookup.rgb, vec3gamma);
-    lookup = textureLod(smp, uv + vec2( 0, 0) * d, 0).rgb; color +=pow(lookup.rgb, vec3gamma);
-    lookup = textureLod(smp, uv + vec2( 0,+1) * d, 0).rgb; color +=pow(lookup.rgb, vec3gamma);
-    lookup = textureLod(smp, uv + vec2(+1,-1) * d, 0).rgb; color +=pow(lookup.rgb, vec3gamma);
-    lookup = textureLod(smp, uv + vec2(+1, 0) * d, 0).rgb; color +=pow(lookup.rgb, vec3gamma);
-    lookup = textureLod(smp, uv + vec2(+1,+1) * d, 0).rgb; color +=pow(lookup.rgb, vec3gamma);
-    return color/(9.0);
+    const vec3 g = vec3(gamma);
+
+    vec2 uv_minus_d = uv - d;
+    vec2 uvC = uv;
+    vec2 uv_plus_d = uv + d;
+
+    vec3 c = pow(textureLod(smp, vec2(uv_minus_d.x, uv_minus_d.y), 0).rgb, g)
+           + pow(textureLod(smp, vec2(uv_minus_d.x, uvC.y), 0).rgb, g)
+           + pow(textureLod(smp, vec2(uv_minus_d.x, uv_plus_d.y), 0).rgb, g)
+           + pow(textureLod(smp, vec2(uvC.x, uv_minus_d.y), 0).rgb, g)
+           + pow(textureLod(smp, vec2(uvC.x, uvC.y), 0).rgb, g)
+           + pow(textureLod(smp, vec2(uvC.x, uv_plus_d.y), 0).rgb, g)
+           + pow(textureLod(smp, vec2(uv_plus_d.x, uv_minus_d.y), 0).rgb, g)
+           + pow(textureLod(smp, vec2(uv_plus_d.x, uvC.y), 0).rgb, g)
+           + pow(textureLod(smp, vec2(uv_plus_d.x, uv_plus_d.y), 0).rgb, g);
+
+    return c * (1.0 / 9.0);
 }
 
 void main() {

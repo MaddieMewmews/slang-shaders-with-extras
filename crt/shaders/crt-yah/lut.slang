@@ -54,12 +54,10 @@ vec3 apply_lut(vec3 color, sampler2D lut_sampler)
     return texture(lut_sampler, vec2(blue, green)).rgb;
 }
 
-// no gamma correction
-#define INPUT(color) color
-#define OUTPUT(color) color
-
+// without gamma correction
 void main()
 {
+    // return if effect is disabled
     if (PARAM_COLOR_PROFILE == 0.0)
     {
         FragColor = texture(Source, TexCoord);
@@ -67,7 +65,7 @@ void main()
         return;
     }
 
-    vec3 color = INPUT(texture(Source, TexCoord).rgb);
+    vec3 color = texture(Source, TexCoord).rgb;
 
     vec3 ntsc_color = apply_lut(color, SamplerLutNtsc);
     vec3 trinitron_color = apply_lut(color, SamplerLutTrinitron);
@@ -76,5 +74,5 @@ void main()
         ? mix(color, ntsc_color, -PARAM_COLOR_PROFILE)
         : mix(color, trinitron_color, PARAM_COLOR_PROFILE);
 
-    FragColor = vec4(OUTPUT(color), 1.0);
+    FragColor = vec4(color, 1.0);
 }

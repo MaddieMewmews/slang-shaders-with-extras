@@ -13,6 +13,7 @@ layout(std140, set = 0, binding = 0) uniform UBO
     vec4 OutputSize;
     vec4 FinalViewportSize;
     float GLOBAL_MASTER;
+    float SCREEN_RESOLUTION_SCALE;
     float SCREEN_ORIENTATION;
     float SCREEN_SCALE;
 } global;
@@ -33,14 +34,19 @@ layout(location = 1) out vec2 TexCoordR;
 layout(location = 2) out vec2 TexCoordG;
 layout(location = 3) out vec2 TexCoordB;
 
+// used in common/screen-helper.h
+#define BASE_SIZE (PARAM_SCREEN_RESOLUTION_SCALE > 3 ? 480.0 : 240.0)
+#define ALLOW_AUTO_SCALE (PARAM_SCREEN_RESOLUTION_SCALE > 1)
+#define ALLOW_AUTO_UP_SCALE (PARAM_SCREEN_RESOLUTION_SCALE == 3 || PARAM_SCREEN_RESOLUTION_SCALE == 5)
+
 #include "common/screen-helper.h"
 
 void main()
 {
     gl_Position = global.MVP * Position;
 
-    float screen_orientation = get_orientation(global.OutputSize.xy, PARAM_SCREEN_ORIENTATION);
-    float screen_scale = get_multiple(global.OriginalSize.xy, screen_orientation, -PARAM_SCREEN_SCALE);
+    int screen_orientation = get_orientation(global.OutputSize.xy, PARAM_SCREEN_ORIENTATION);
+    float screen_scale = get_screen_multiple(global.OriginalSize.xy, screen_orientation, -PARAM_SCREEN_SCALE);
 
     // limit deconverge to range of [-1.0, 1.0]
     float linear_limit = PARAM_DECONVERGE_LINEAR > 0
@@ -96,13 +102,15 @@ layout(location = 3) in vec2 TexCoordB;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 2) uniform sampler2D Source;
 
+#include "common/colorspace-srgb.h"
+
+// required by blur.h
 #define INPUT(color) decode_gamma(color)
 #define OUTPUT(color) encode_gamma(color)
 
-#include "common/colorspace-srgb.h"
-
 void main()
 {
+    // return if effect is disabled
     if (PARAM_DECONVERGE_LINEAR == 0.0
         && PARAM_DECONVERGE_RADIAL == 0.0)
     {

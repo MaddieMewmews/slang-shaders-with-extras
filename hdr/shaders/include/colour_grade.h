@@ -204,10 +204,10 @@ float Contrast(const float luminance)
 
 vec3 Saturation(const vec3 colour)
 {
-   // Rec.2020 Luma Coefficients (Standard)
-   const vec3 kRec2020Luma = vec3(0.2627f, 0.6780f, 0.0593f);
-   
-   const float luma           = dot(colour, kRec2020Luma);
+   // Rec.709 Luma Coefficients
+   const vec3 kRec709Luma = vec3(0.2126f, 0.7152f, 0.0722f);
+
+   const float luma           = dot(colour, kRec709Luma);
    const float saturation     = 0.5f + HCRT_SATURATION * 0.5f;
 
    return mix(vec3(luma), colour, vec3(saturation) * 2.0f);
@@ -223,18 +223,18 @@ vec3 BrightnessContrastSaturation(const vec3 xyz)
 
    const vec3 contrast_linear = vec3(pow(Y_contrast, 2.4f), Yxy.y, Yxy.z);
    const vec3 xyz_graded      = YxytoXYZ(contrast_linear);
-   const vec3 rec2020_linear  = xyz_graded * kXYZ_to_2020;
-   const vec3 saturated       = Saturation(rec2020_linear);
+   const vec3 rec709_linear   = xyz_graded * kXYZ_to_709;
+   const vec3 saturated       = Saturation(rec709_linear);
 
    return saturated;
 }
 
-vec3 GamutBoost(vec3 colour_2020)
+vec3 GamutBoost(vec3 colour_709)
 {
-   const vec3 luma_weights = vec3(0.2627f, 0.6780f, 0.0593f);
-   float luma = dot(colour_2020, luma_weights);
+   const vec3 luma_weights = vec3(0.2126f, 0.7152f, 0.0722f);
+   float luma = dot(colour_709, luma_weights);
 
-   return mix(vec3(luma), colour_2020, HCRT_COLOUR_BOOST_FACTOR);
+   return mix(vec3(luma), colour_709, HCRT_COLOUR_BOOST_FACTOR);
 }
 
 vec3 ColourGrade(const vec3 colour)
@@ -256,29 +256,8 @@ vec3 ColourGrade(const vec3 colour)
 
    const vec3 boosted_colour  = GamutBoost(graded_colour);
 
-   // Initialize with default (Rec.2020)
-   vec3 pipeline_colour = boosted_colour;
-
-   uint space = uint(HCRT_OUTPUT_COLOUR_SPACE);
-   
-   if (space == 1 || space == 2) // Rec.709 / sRGB
-   {
-       pipeline_colour = boosted_colour * k2020_to_sRGB;
-   }
-   else if (space == 3) // DCI-P3
-   {
-      pipeline_colour = boosted_colour * k2020_to_P3;
-   }
-   else if (space == 4) // AdobeRGB
-   {
-      pipeline_colour = boosted_colour * k2020_to_Adobe;
-   }
-   // space == 0 (Rec.2020) -> Identity (Pass-through)
-
-   // Clamp to prevent negative values from breaking the CRT mask
-   pipeline_colour = max(pipeline_colour, vec3(0.0f));
-
-   return pipeline_colour;
+   // Output is now linear Rec.709 — ExpandGamut boost is applied in the HDR pass
+   return max(boosted_colour, vec3(0.0f));
 }
 
 #else // !SONY_MEGATRON_VERSION_2

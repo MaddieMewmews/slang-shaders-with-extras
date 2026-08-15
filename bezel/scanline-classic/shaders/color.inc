@@ -69,6 +69,11 @@ mat3 sRGB_TO_XYZ = mat3(
     0.3576, 0.7152, 0.1192,
     0.1805, 0.0722, 0.9505);
 
+mat3 DCIP3_TO_XYZ = mat3(
+    0.4866, 0.2290, 0.0000,
+    0.2657, 0.6917, 0.0451,
+    0.1982, 0.0793, 1.0439);
+
 mat3 NTSC_TO_XYZ = mat3(
     0.607, 0.299, 0.000,
     0.173, 0.586, 0.066,
@@ -88,6 +93,22 @@ mat3 SMPTE_C_TO_XYZ = mat3(
     0.3935, 0.2124, 0.0187,
     0.3653, 0.7011, 0.1119,
     0.1912, 0.0866, 0.9584);
+
+mat3 BT2020_TO_XYZ = mat3(
+    0.6370, 0.2627, 0.0000,
+    0.1446, 0.6780, 0.0281,
+    0.1689, 0.0593, 1.0610);
+
+// Bradford chromatic adaptation matrices (XYZ ↔ LMS)
+mat3 XYZ_TO_LMS = mat3(
+     0.8951, -0.7502,  0.0389,
+     0.2664,  1.7135, -0.0685,
+    -0.1614,  0.0367,  1.0296);
+
+mat3 LMS_TO_XYZ = mat3(
+    0.9869929, 0.4323053, -0.0085287,
+    -0.1470543, 0.5183603, 0.0400428,
+    0.1599627, 0.0492912, 0.9684867);
 
 mat3 RGB_TO_YIQ = mat3(
     0.299,  0.5959,  0.2115,
@@ -121,7 +142,7 @@ mat3 YCbCr_TO_RGB = mat3(
     1.0,    1.0,      1.0,
     0.0,   -0.1873,   1.8556,
     1.5748, -0.4681,   0.0);
-    
+
 
 mat3 colorspace_rgb(const float colorspace)
 {
@@ -143,6 +164,15 @@ vec3 xyY_to_XYZ(const vec3 xyY)
     float z = 1.0 - x - y;
 
     return vec3(Y * x / y, Y, Y * z / y);
+}
+
+vec3 YrYgYb_to_XYZ(const vec3 YrYgYb, const Colorimetry colorimetry)
+{
+    vec3 red_XYZ = xyY_to_XYZ(vec3(colorimetry.red_xy.x, colorimetry.red_xy.y, YrYgYb.r));
+    vec3 green_XYZ = xyY_to_XYZ(vec3(colorimetry.green_xy.x, colorimetry.green_xy.y, YrYgYb.g));
+    vec3 blue_XYZ = xyY_to_XYZ(vec3(colorimetry.blue_xy.x, colorimetry.blue_xy.y, YrYgYb.b));
+
+    return red_XYZ + green_XYZ + blue_XYZ;
 }
 
 vec3 XYZ_to_CIE_LUV(vec3 XYZ) {
@@ -182,6 +212,49 @@ vec3 CIE_LUV_to_XYZ(vec3 LUV) {
     return vec3(X, Y, Z);
 }
 
+// --- IPT conversion helpers --- //
+
+const float IPT_GAMMA = 0.43;
+
+const mat3 IPT_XYZ_TO_LMS = mat3(
+    0.4002, -0.2280, 0.0,
+    0.7075,  1.1500, 0.0,
+   -0.0807,  0.0612, 0.9184);
+
+const mat3 IPT_LMS_TO_XYZ = mat3(
+    1.8502,  0.3668, 0.0,
+   -1.1383,  0.6439, 0.0,
+    0.2384, -0.0107, 1.0889);
+
+const mat3 IPT_LMS_TO_IPT = mat3(
+    0.4000,  4.4550,  0.8056,
+    0.4000, -4.8510,  0.3572,
+    0.2000,  0.3960, -1.1628);
+
+const mat3 IPT_IPT_TO_LMS = mat3(
+    1.0,  1.0,  1.0,
+    0.0975689, -0.11388, 0.0326151,
+    0.205226,  0.133217, -0.67689);
+
+vec3 ipt_signed_pow(vec3 v, float p)
+{
+    return sign(v) * pow(abs(v), vec3(p));
+}
+
+vec3 XYZ_to_IPT(vec3 XYZ)
+{
+    vec3 lms = IPT_XYZ_TO_LMS * XYZ;
+    vec3 lms_p = ipt_signed_pow(lms, IPT_GAMMA);
+    return IPT_LMS_TO_IPT * lms_p;
+}
+
+vec3 IPT_to_XYZ(vec3 IPT)
+{
+    vec3 lms_p = IPT_IPT_TO_LMS * IPT;
+    vec3 lms = ipt_signed_pow(lms_p, 1.0 / IPT_GAMMA);
+    return IPT_LMS_TO_XYZ * lms;
+}
+
 mat3 ParkerCCorrection = mat3(
      1.2903, -0.0036, 0.0317,
     -0.2703,  0.9515, 0.1980,
@@ -208,22 +281,13 @@ mat3 get_RGB_to_XYZ(const vec3 red_XYZ, const vec3 green_XYZ, const vec3 blue_XY
 // Linear variant of the Bradford chromatic adaptation transform
 mat3 bradford_linear(vec3 wref_XYZ, vec3 wout_XYZ)
 {
-    const mat3 M = mat3(
-         0.8951, -0.7502,  0.0389,
-         0.2664,  1.7135, -0.0685,
-        -0.1614,  0.0367,  1.0296);
-    const mat3 M_inv = mat3(
-        0.9869929, 0.4323053, -0.0085287,
-        -0.1470543, 0.5183603, 0.0400428,
-        0.1599627, 0.0492912, 0.9684867);
-
-    vec3 wref_RGB = M * wref_XYZ;
-    vec3 wout_RGB = M * wout_XYZ;
+    vec3 wref_RGB = XYZ_TO_LMS * wref_XYZ;
+    vec3 wout_RGB = XYZ_TO_LMS * wout_XYZ;
     mat3 M_adt = mat3(
         wout_RGB.r / wref_RGB.r, 0.0, 0.0,
         0.0, wout_RGB.g / wref_RGB.g, 0.0,
         0.0, 0.0, wout_RGB.b / wref_RGB.b);
-    return M_inv * M_adt * M;
+    return LMS_TO_XYZ * M_adt * XYZ_TO_LMS;
 }
 
 // Chromatic adaptation transform from Zhai et al. 2018
@@ -284,4 +348,45 @@ vec3 decode_luma_chroma_to_rgb(vec3 yc, float model) {
     } else {
         return YCbCr_TO_RGB * yc;
     }
+}
+
+// SMPTE 2084 PQ (Perceptual Quantizer) encoding
+// Encodes linear RGB [0, 1] to PQ display values [0, 1]
+// Input is assumed to be linear light relative to 100 nits reference peak
+vec3 pq(vec3 linear)
+{
+    const float m1 = 0.1593017578125;      // 2610 / (4 * 4096)
+    const float m2 = 78.84375;              // 2523 * 4096 / 32
+    const float c1 = 0.8359375;             // 3424 / 4096
+    const float c2 = 18.8515625;            // 2413 * 4096 / 32
+    const float c3 = 18.6875;               // 2392 * 4096 / 32
+
+    // Normalize input for PQ (assume 100 nits reference)
+    // PQ standard uses 10000 nits peak, map [0,1] at 100 nits to [0,1] at 10000 nits
+    vec3 L = linear * 0.01;                // Scale from 100 nits reference to PQ range (100/10000)
+    L = max(L, vec3(0.0));
+
+    // Apply PQ curve per-channel
+    vec3 L_p = pow(L, vec3(m1));
+    vec3 pq_result = pow((c1 + c2 * L_p) / (1.0 + c3 * L_p), vec3(m2));
+
+    return pq_result;
+}
+
+// Inverse SMPTE 2084 PQ decoding
+// Decodes PQ display values [0, 1] to linear RGB [0, 1]
+vec3 pq_inverse(vec3 pq_val)
+{
+    const float m1 = 0.1593017578125;      // 2610 / (4 * 4096)
+    const float m2 = 78.84375;              // 2523 * 4096 / 32
+    const float c1 = 0.8359375;             // 3424 / 4096
+    const float c2 = 18.8515625;            // 2413 * 4096 / 32
+    const float c3 = 18.6875;               // 2392 * 4096 / 32
+
+    // Inverse PQ curve per-channel
+    vec3 L_p = pow(pq_val, vec3(1.0 / m2));
+    vec3 L = pow((L_p - c1) / max((c2 - c3 * L_p), 1e-6), vec3(1.0 / m1));
+
+    // Convert back to linear RGB [0, 1] where 1.0 = 100 nits reference
+    return L * 100.0;                      // Scale from PQ range to 100 nits reference (10000/100)
 }

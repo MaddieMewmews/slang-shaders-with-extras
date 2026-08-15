@@ -17,12 +17,21 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 //
-// Bezel with glow effect (SDR version)
+// Bezel with glow effect (WCG version)
 // ------------------------------------------------
-// Input: sRGB signal
-// Output: sRGB signal
+// Input: linear rec. BT.2020 signal
+// Output: BT.2020 signal
 
 #pragma name Bezel
 #pragma format A2B10G10R10_UNORM_PACK32
 
+#define WIDE_COLOR
+#define WCG
+
+#define COLOR_SPACE_TO_XYZ (GAMUT_SELECT < 0.5 ? BT2020_TO_XYZ : DCIP3_TO_XYZ)
+#define XYZ_TO_COLOR_SPACE (GAMUT_SELECT < 0.5 ? XYZ_TO_BT2020 : XYZ_TO_DCIP3)
+
+#pragma parameter GAMUT_SELECT "Output gamut (BT.2020, DCI-P3)" 0.0 0.0 1.0 1.0
+
+// lint: allow-unused-include
 #include "bezel-base.slang"

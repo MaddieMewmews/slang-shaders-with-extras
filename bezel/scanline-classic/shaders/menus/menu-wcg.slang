@@ -1,6 +1,6 @@
 #version 450
 
-// Filename: menu.slang
+// Filename: menu-sdr.slang
 //
 // Copyright (C) 2023, 2025 W. M. Martinez
 //
@@ -25,8 +25,9 @@
 #include "parameters/user-common.inc"
 #include "parameters/user-uncommon.inc"
 #include "parameters/output-curve.inc"
-#include "parameters/output-tonemap.inc"
+#include "parameters/output-tonemap-wcg.inc"
 #include "parameters/output-color.inc"
+#include "parameters/output-color-wcg.inc"
 #include "parameters/output-bezel.inc"
 #include "parameters/service-geometry.inc"
 #include "parameters/scanraster.inc"
@@ -38,6 +39,5 @@
 #include "parameters/limiter.inc"
 #include "parameters/sys-timing.inc"
 #include "parameters/sys-rgb.inc"
-#include "parameters/debug-common.inc"
 
 #include "menu-base.slang"

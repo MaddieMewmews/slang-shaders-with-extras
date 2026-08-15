@@ -12,7 +12,7 @@ Originally part of the crt\crt-sony-pvm-4k-hdr.slangp but can be used for any sh
 
 #pragma format R16G16B16A16_SFLOAT
 
-#include "include\inverse_tonemap.h"
+#include "include/inverse_tonemap.h"
 
 layout(push_constant) uniform Push
 {
@@ -32,7 +32,7 @@ layout(push_constant) uniform Push
 layout(std140, set = 0, binding = 0) uniform UBO
 {
 	mat4 MVP;
-	float EnableHDR;
+	uint HDRMode;
 } global;
 
 #pragma stage vertex
@@ -57,7 +57,7 @@ void main()
 
    vec3 sdr = pow(abs(source.rgb), vec3(params.DisplayGamma));       /* Display Gamma - needs to be determined by calibration screen */
 
-   if(global.EnableHDR >= 1.0f)
+   if(global.HDRMode >= 1u)
    {
       FragColor = vec4(InverseTonemap(sdr, params.MaxNits, params.PaperWhiteNits), source.a); 
    }

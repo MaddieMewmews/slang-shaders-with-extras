@@ -1,6 +1,6 @@
-#ifndef FRAME_HELPER
+#ifndef FRAME_HELPER_DEFINED
 
-#define FRAME_HELPER
+#define FRAME_HELPER_DEFINED
 
 #ifndef BASE_FRAME_RATE
     // The base frame rate.
@@ -13,7 +13,7 @@
 #endif
 
 #ifndef FRAME_TIME_DELTA
-    // The frame time delta (in microseconds).    
+    // The frame time delta (in microseconds).
     #ifdef _HAS_FRAMETIME_UNIFORMS
         #define FRAME_TIME_DELTA global.FrameTimeDelta
     #else
@@ -49,4 +49,4 @@ uint GetUniformFrameCount(float frame_rate)
     return uint(round(GetUniformFrameFactor() * FRAME_COUNT * frame_rate_factor));
 }
 
-#endif // FRAME_HELPER
+#endif // FRAME_HELPER_DEFINED
