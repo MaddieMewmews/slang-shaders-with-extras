@@ -62,8 +62,8 @@ float FINE_GLOW = (params.FINE_GLOW > 0.5) ? params.FINE_GLOW : mix(0.75, 0.5, -
 #pragma parameter SIZEH "          Horizontal Glow Radius" 6.0 1.0 50.0 1.0 
 #define SIZEH params.SIZEH
 
-#pragma parameter SIGMA_H "          Horizontal Glow Sigma" 1.20 0.20 15.0 0.05
-#define SIGMA_H params.SIGMA_H
+#pragma parameter SIGMA_H "          Horizontal Glow Sigma" 1.20 0.20 3.0 0.01
+float SIGMA_H = params.SIGMA_H * SIZEH / 6.0;
 
 
 layout(std140, set = 0, binding = 0) uniform UBO

@@ -38,7 +38,7 @@ float auto_rez = mix(1.0, 0.5, clamp(params.auto_res * round(params.OriginalSize
 #pragma parameter ntsc_phase    "NTSC Phase: Auto | 2 phase | 3 phase | Mixed | PCE" 1.0 1.0 5.0 1.0
 #pragma parameter ntsc_rainbow1 "NTSC Coloring/Rainbow Effect (2-phase)"  0.0 0.0 3.0 1.0
 #pragma parameter ntsc_sharp  "NTSC Sharpness (Adaptive)" 0.0 -10.0 10.0 0.50
-#pragma parameter ntsc_fonts  "NTSC Sharpness - Preserve Fonts (0.35 is a Good Spot)" 0.25 0.25 1.0 0.01
+#pragma parameter ntsc_fonts  "NTSC Preserve Fonts (0.25 = OFF)" 0.25 0.25 0.75 0.01
 #pragma parameter ntsc_shape  "NTSC Sharpness Shape" 0.80 0.5 1.0 0.025
 #pragma parameter ntsc_charp  "NTSC Preserve 'Edge' Colors 2-phase" 0.0 0.0 10.0 0.50
 #pragma parameter ntsc_charp3 "NTSC Preserve 'Edge' Colors 3-phase" 0.0 0.0 10.0 0.50
@@ -176,7 +176,7 @@ if (params.ntsc_fonts > 0.255)
    float b1 = texture(NPass1, texcoord0 - yy).a;
    float d1 = texture(NPass1, texcoord0 + yy).a;
    float d2 = texture(NPass1, texcoord0 + xx + yy).a;
-   float maxdif = float(0.5*((abs(c0-c1)+abs(c1-c2))) > (1.0-params.ntsc_fonts));
+   float maxdif = float(0.5*((abs(c0-c1)+abs(c1-c2))) > (1.0 - params.ntsc_fonts)) * float(abs(c2-c0) < 0.05);
    
    float linecb  = smothstep(0.1, 0.0, max(abs(c1-b1),abs(c1-d1))); // checkerboard check
    linecb = linecb * float (abs(c1-b1)<0.05 || abs(c2-d2)<0.05);
@@ -191,9 +191,9 @@ if (params.ntsc_fonts > 0.255)
       ca = texture(Source, texcoord -  i*xx).x;
       c0 = texture(Source, texcoord -  j*xx).x;
       c2 = texture(Source, texcoord +  i*xx).x;
-	  cb = texture(Source, texcoord +  j*xx).x;
+      cb = texture(Source, texcoord +  j*xx).x;
       xdif1 = max(abs(ca-c0)-th, xdif1);
-	  xdif2 = max(abs(cb-c2)-th, xdif2);
+      xdif2 = max(abs(cb-c2)-th, xdif2);
    }   
    float linex = smothstep(0.0, 0.125, min(xdif1,xdif2));
    
@@ -237,10 +237,10 @@ if (params.ntsc_fonts > 0.255)
 
    float ntsc_sharp = abs(params.ntsc_sharp);
    
-   if (ntsc_sharp > 0.25)
+   if (ntsc_sharp > 0.25 || params.ntsc_fonts > 0.255)
    {
-      float mixer = sweight;
-      if (params.ntsc_sharp > 0.25) mixer = sweighr; mixer*=0.1*ntsc_sharp;
+      float mixer = sweighr;
+      if (params.ntsc_sharp < -0.25) mixer = sweight; mixer*=max(0.1*ntsc_sharp, diffboost*1.25);
       float lummix = mix(lum2, lum1, mixer);
       float lm1 =  mix(lum2*lum2, lum1*lum1,mixer); lm1 = sqrt(lm1);
       float lm2 =  mix(sqrt(lum2), sqrt(lum1),mixer); lm2 = lm2*lm2;

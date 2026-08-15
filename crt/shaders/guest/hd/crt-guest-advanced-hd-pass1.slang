@@ -34,7 +34,6 @@ layout(push_constant) uniform Push
 	float HSHARPNESS;
 	float S_SHARP;
 	float HARNG;
-	float HSHARP; 
 	float spike;
 	float SIGMA_VER;
 	float VSHARPNESS;
@@ -51,28 +50,25 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #pragma parameter bogus_filtering "[ FILTERING OPTIONS ]: " 0.0 0.0 1.0 1.0
 
 #pragma parameter auto_res "          SNES/Amiga Hi-Res Auto Mode" 0.0 0.0 1.0 1.0
-#define auto_res params.auto_res
+float auto_rez = (params.OriginalSize.y < 375.0) ? mix(1.0, 2.0, clamp(params.auto_res * round(params.OriginalSize.x/300.0)-1.0, 0.0,1.0)) : 1.0;
 
 #pragma parameter internal_res "          Internal Resolution" 1.0 0.5 8.0 0.10
 
-float internal_res = (params.OriginalSize.y < 375.0) ? mix(params.internal_res, 1.85*params.internal_res, clamp(auto_res * round(params.OriginalSize.x/300.0)-1.0, 0.0, 1.0)) : params.internal_res;
+float internal_res = params.internal_res;
 
 #pragma parameter HSHARPNESS "          Horizontal Filter Range" 1.0 1.0 8.0 0.05
-#define HSHARPNESS params.HSHARPNESS
+float HSHARPNESS = params.HSHARPNESS * auto_rez;
 
-#pragma parameter SIGMA_HOR "          Horizontal Blur Sigma" 0.50 0.1 7.0 0.025
-#define SIGMA_HOR params.SIGMA_HOR
+#pragma parameter SIGMA_HOR "          Horizontal Blur Sigma" 0.50 0.10 1.0 0.01
+float SIGMA_HOR = params.SIGMA_HOR * HSHARPNESS;
 
 #pragma parameter S_SHARP "          Substractive Sharpness" 1.0 0.0 2.0 0.10
 #define S_SHARP params.S_SHARP
 
-#pragma parameter HSHARP "          Sharpness Definition" 1.20 0.0 2.0 0.10
-#define HSHARP params.HSHARP
-
-#pragma parameter MAXS "          Maximum Sharpness" 0.15 0.0 0.30 0.01
+#pragma parameter MAXS "          Maximum Sharpness" 0.20 0.0 0.30 0.01
 #define MAXS params.MAXS
 
-#pragma parameter HARNG "          Substractive Sharpness Ringing" 0.2 0.0 4.0 0.10
+#pragma parameter HARNG "          Substractive Sharpness Ringing" 0.3 0.0 4.0 0.10
 #define HARNG params.HARNG 
 
 #pragma parameter bogus_vfiltering "[ VERTICAL/INTERLACING FILTERING OPTIONS ]: " 0.0 0.0 1.0 1.0
@@ -80,8 +76,8 @@ float internal_res = (params.OriginalSize.y < 375.0) ? mix(params.internal_res, 
 #pragma parameter VSHARPNESS "          Vertical Filter Range" 1.0 1.0 8.0 0.05
 #define VSHARPNESS global.VSHARPNESS
 
-#pragma parameter SIGMA_VER "          Vertical Blur Sigma" 0.50 0.1 7.0 0.025
-#define SIGMA_VER global.SIGMA_VER
+#pragma parameter SIGMA_VER "          Vertical Blur Sigma" 0.50 0.10 1.0 0.01
+#define SIGMA_VER global.SIGMA_VER*VSHARPNESS
 
 #pragma parameter spike "          Scanline Spike Removal" 1.0 0.0 2.0 0.10
 #define spike params.spike
@@ -138,6 +134,7 @@ void main()
 	vec3 cmax = 0.0.xxx;
 	vec3 cmin = 1.0.xxx;
 	float sharp = gaussian(hsharpness) * S_SHARP;
+	float ksharp = -2.0*hsharpness*invsqrsigma*sharp;
 	float maxsharp = MAXS;
 	float FPR = hsharpness;
 	float FPRi = 1.0/hsharpness;
@@ -156,8 +153,8 @@ void main()
 		pixel  = COMPAT_TEXTURE(LinearizePass, tex + n*dx).rgb;
 		
 		w = gaussian(n+f) - sharp;
-		fpx = (abs(n+f)-FPR)*FPRi;
-		if (w < 0.0) w = max(w, mix(-maxsharp, 0.0, pow(clamp(fpx,0.0,1.0), HSHARP)));
+		fpx = clamp((abs(n+f)-FPR)*FPRi, 0.0, 1.0);
+		if (w < 0.0) w = max(ksharp*fpx, maxsharp * ksharp * (1.0-fpx*fpx));
 		else
 		{
 			cmax = max(cmax, pixel); cmin = min(cmin, pixel);

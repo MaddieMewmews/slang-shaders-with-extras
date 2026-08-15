@@ -3,7 +3,7 @@
 /*
    CRT - Guest - NTSC - Pass1
    
-   Copyright (C) 2018-2025 guest(r)
+   Copyright (C) 2018-2026 guest(r)
 
    Incorporates many good ideas and suggestions from Dr. Venom.
    I would also like give thanks to many Libretro forums members for continuous feedback, suggestions and using the shader.
@@ -34,7 +34,6 @@ layout(push_constant) uniform Push
 	float HSHARPNESS;
 	float S_SHARP;
 	float HARNG;
-	float HSHARP; 
 	float spike;
 	float filter_res;
 	float MAXS;
@@ -52,21 +51,18 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #pragma parameter bogus_filtering "[ FILTERING OPTIONS ]: " 0.0 0.0 1.0 1.0
 
 #pragma parameter auto_res "          SNES/Amiga Hi-Res Auto Mode" 0.0 0.0 1.0 1.0
-float auto_rez = (params.OriginalSize.y < 375.0) ? mix(1.0, 1.85, clamp(params.auto_res * round(params.OriginalSize.x/300.0)-1.0, 0.0, 1.0)) : 1.0;
+float auto_rez = (params.OriginalSize.y < 375.0) ? mix(1.0, 2.0, clamp(params.auto_res * round(params.OriginalSize.x/300.0)-1.0, 0.0,1.0)) : 1.0;
 
 #pragma parameter HSHARPNESS "          Horizontal Filter Range" 1.60 1.0 8.0 0.05
-#define HSHARPNESS params.HSHARPNESS
+float HSHARPNESS = params.HSHARPNESS * auto_rez;
 
-#pragma parameter SIGMA_HOR "          Horizontal Blur Sigma" 0.80 0.1 7.0 0.025
-#define SIGMA_HOR params.SIGMA_HOR
+#pragma parameter SIGMA_HOR "          Horizontal Blur Sigma" 0.50 0.15 1.0 0.01
+float SIGMA_HOR = params.SIGMA_HOR * HSHARPNESS;
 
-#pragma parameter S_SHARP "          Substractive Sharpness" 1.10 0.0 3.0 0.05
+#pragma parameter S_SHARP "          Substractive Sharpness" 1.1 0.0 3.0 0.05
 #define S_SHARP params.S_SHARP
 
-#pragma parameter HSHARP "          Sharpness Definition" 1.20 0.0 2.0 0.10
-#define HSHARP params.HSHARP
-
-#pragma parameter MAXS "          Maximum Sharpness" 0.18 0.0 0.30 0.01
+#pragma parameter MAXS "          Maximum Sharpness" 0.21 0.0 0.30 0.01
 #define MAXS params.MAXS 
 
 #pragma parameter HARNG "          Substractive Sharpness Ringing" 0.30 0.0 4.0 0.05
@@ -122,11 +118,12 @@ void main()
 	vec3 cmax = 0.0.xxx;
 	vec3 cmin = 1.0.xxx;
 	
-	float xscale = max(prescalex.x * 0.4, 1.0) * auto_rez;
+	float xscale = max(prescalex.x * 0.4, 1.0);
 	float hsharpness = HSHARPNESS * xscale * filter_res;
 	
 	xscale = 1.0/(2.0*SIGMA_HOR*SIGMA_HOR*xscale*xscale*filter_res*filter_res);	
 	float sharp = gaussian(hsharpness, xscale) * S_SHARP;
+	float ksharp = -2.0*hsharpness*xscale*sharp;	
 	float maxsharp = MAXS;
 	float FPR = hsharpness;
 	float FPRi = 1.0/hsharpness;	
@@ -146,8 +143,8 @@ void main()
 		pixel  = COMPAT_TEXTURE(LinearizePass, tex + n*dx).rgb;
 		
 		w = gaussian(n+f,xscale) - sharp;
-		fpx = (abs(n+f)-FPR)*FPRi;
-		if (w < 0.0) w = max(w, mix(-maxsharp, 0.0, pow(clamp(fpx,0.0,1.0), HSHARP)));
+		fpx = clamp((abs(n+f)-FPR)*FPRi, 0.0, 1.0);
+		if (w < 0.0) w = max(ksharp*fpx, maxsharp * ksharp * (1.0-fpx*fpx));
 		else
 		{
 			cmax = max(cmax, pixel); cmin = min(cmin, pixel);

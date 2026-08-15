@@ -3,7 +3,7 @@
 /*
    Gaussian blur - horizontal pass, dynamic range, resizable
    
-   Copyright (C) 2020 - 2025 guest(r)
+   Copyright (C) 2020 - 2026 guest(r)
 
    This program is free software; you can redistribute it and/or
    modify it under the terms of the GNU General Public License
@@ -43,10 +43,10 @@ float auto_rez = (params.OriginalSize.y < 375.0) ? mix(1.0, 2.0, clamp(params.au
 float FINE_BLOOM = (params.FINE_BLOOM > 0.5) ? params.FINE_BLOOM : mix(0.75, 0.5, -params.FINE_BLOOM);
 
 #pragma parameter SIZEHB "          Horizontal Bloom/Halation Radius" 3.0 1.0 50.0 1.0 
-#define SIZEHB params.SIZEHB
+#define SIZEHB params.SIZEHB * auto_rez
 
-#pragma parameter SIGMA_HB "          Horizontal Bloom/Halation Sigma" 0.75 0.25 15.0 0.025
-#define SIGMA_HB params.SIGMA_HB
+#pragma parameter SIGMA_HB "          Horizontal Bloom/Halation Sigma" 0.75 0.25 3.0 0.01
+float SIGMA_HB = params.SIGMA_HB * SIZEHB / 3.0;
 
 layout(std140, set = 0, binding = 0) uniform UBO
 {
@@ -71,7 +71,7 @@ layout(set = 0, binding = 2) uniform sampler2D LinearizePass;
 
 #define COMPAT_TEXTURE(c,d) texture(c,d)
 
-float invsqrsigma = 1.0/(2.0*SIGMA_HB*SIGMA_HB*auto_rez*auto_rez);
+float invsqrsigma = 1.0/(2.0*SIGMA_HB*SIGMA_HB);
 
 float gaussian(float x)
 {
@@ -90,7 +90,7 @@ void main()
 	float w;
 	float wsum = 0.0;
 	vec4 pixel;
-	float n = -SIZEHB * auto_rez;
+	float n = -SIZEHB;
 
 	do
 	{
@@ -102,7 +102,7 @@ void main()
 		wsum   = wsum + w;
 		n = n + 1.0;
 		
-	} while (n <= SIZEHB * auto_rez);
+	} while (n <= SIZEHB);
 
 	color = color / wsum;
 	

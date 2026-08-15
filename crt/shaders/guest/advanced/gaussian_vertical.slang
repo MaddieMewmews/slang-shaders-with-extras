@@ -35,8 +35,8 @@ layout(push_constant) uniform Push
 #pragma parameter SIZEV "          Vertical Glow Radius" 6.0 1.0 50.0 1.0 
 #define SIZEV params.SIZEV
 
-#pragma parameter SIGMA_V "          Vertical Glow Sigma" 1.20 0.20 15.0 0.05
-#define SIGMA_V params.SIGMA_V
+#pragma parameter SIGMA_V "          Vertical Glow Sigma" 1.20 0.20 3.0 0.01
+float SIGMA_V = params.SIGMA_V * SIZEV / 6.0;
 
 #pragma parameter FINE_GLOW "          Fine Glow/M.Glow Sampling" 1.0 -1.0 5.0 1.0 
 float FINE_GLOW = (params.FINE_GLOW > 0.5) ? params.FINE_GLOW : mix(0.75, 0.5, -params.FINE_GLOW);

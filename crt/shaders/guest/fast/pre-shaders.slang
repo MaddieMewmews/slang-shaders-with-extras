@@ -3,7 +3,7 @@
 /*
    CRT Advanced color altering
    
-   Copyright (C) 2019-2025 guest(r) and Dr. Venom
+   Copyright (C) 2019-2026 guest(r) and Dr. Venom
    
    This program is free software; you can redistribute it and/or
    modify it under the terms of the GNU General Public License
@@ -31,7 +31,8 @@ layout(push_constant) uniform Push
    float LS;
    float LUTLOW, LUTBR;   
    float CP, CS;
-   float BP;   
+   float BP;
+   float BP1;   
    float WP;
    float wp_saturation;
    float vigstr;
@@ -76,8 +77,12 @@ layout(push_constant) uniform Push
 
 #pragma parameter sega_fix "          Sega Brightness Fix" 0.0 0.0 1.0 1.0
 
-#pragma parameter BP "          Raise Black Level" 0.0 -100.0 25.0 1.0
+#pragma parameter BP "          Lower Black Level" 0.0 -100.0 0.0 1.0
+
+#pragma parameter BP1 "          Raise Black Level" 0.0 0.0 25.0 1.0
+
 #define BP params.BP
+#define BP1 params.BP1
 
 #pragma parameter vigstr "          Vignette Strength" 0.0 0.0 2.0 0.05
 
@@ -252,8 +257,8 @@ void main()
 {
    vec4 imgColor = COMPAT_TEXTURE(Source, vTexCoord.xy);
    
-   float w = float ((imgColor.r + imgColor.g + imgColor.b) < 1.5/255.0);
-   float bp = w * BP/255.0;
+   float w = float ((imgColor.r + imgColor.g + imgColor.b) < 4.0/255.0);
+   float bp = w * BP1/255.0;
    
    if (params.sega_fix > 0.5) imgColor.rgb = imgColor.rgb * (255.0 / 239.0);
    
@@ -365,10 +370,9 @@ void main()
 	color = pow(max(color, 0.0), vec3(1.0/p));
 	color = pgc(color);
 	
-	if (BP > -0.5) color = color + bp; else
-	{ 
-		color = max(color + BP/255.0, 0.0) / (1.0 + BP/255.0*step(- BP/255.0, max(max(color.r,color.g),color.b)));
-	}
+   float bp1 = min(BP, 0.0);
+	color = max(color + bp1/255.0, 0.0) / (1.0 + bp1/255.0*step(-bp1/255.0, max(max(color.r,color.g),color.b)));
+	color = color + bp;
 	
 	color = min(color * params.pre_bb, 1.0);
 	

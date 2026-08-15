@@ -3,7 +3,7 @@
 /*
    CRT - Guest - Advanced - HD - Pass2
    
-   Copyright (C) 2018-2025 guest(r)
+   Copyright (C) 2018-2026 guest(r)
 
    Incorporates many good ideas and suggestions from Dr. Venom.
    I would also like give thanks to many Libretro forums members for continuous feedback, suggestions and using the shader.
@@ -26,8 +26,8 @@
 
 layout(push_constant) uniform Push
 {
-	float IOS, brightboost, brightboost1, gsl, scanline1, scanline2, beam_min, beam_max, beam_size,
-    glow, inters, bloom, halation, scans, gamma_c, gamma_c2, no_scanlines, MAXS, tds, clips, hiscan, SIGMA_VER, VSHARPNESS, HARNG, HSHARP, S_SHARP, rolling_scan;
+	float IOS, brightboost, brightboost1, gsl, scanline1, scanline2, beam_min, beam_max, beam_size, cbulge,
+    glow, inters, bloom, halation, scans, gamma_c, gamma_c2, no_scanlines, MAXS, tds, clips, hiscan, SIGMA_VER, VSHARPNESS, HARNG, S_SHARP, rolling_scan;
 } params;
 
 layout(std140, set = 0, binding = 0) uniform UBO
@@ -57,6 +57,8 @@ layout(std140, set = 0, binding = 0) uniform UBO
 	float bmask1;
 	float hmask1;
 	float interm;
+	float ssharp;
+	float bloomsamp;
 } global;
 
 #pragma parameter interm "          Interlace Mode: OFF, Normal 1-3,5; Interpolation 4" 4.0 0.0 5.0 1.0
@@ -70,19 +72,16 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #pragma parameter VSHARPNESS "          Vertical Filter Range" 1.0 1.0 8.0 0.05
 #define VSHARPNESS params.VSHARPNESS
 
-#pragma parameter SIGMA_VER "          Vertical Blur Sigma" 0.50 0.1 7.0 0.025
-#define SIGMA_VER params.SIGMA_VER
+#pragma parameter SIGMA_VER "          Vertical Blur Sigma" 0.50 0.10 1.0 0.01
+float SIGMA_VER = params.SIGMA_VER * VSHARPNESS;
 
 #pragma parameter S_SHARP "          Substractive Sharpness" 1.0 0.0 2.0 0.10
 #define S_SHARP params.S_SHARP
 
-#pragma parameter HSHARP "          Sharpness Definition" 1.20 0.0 2.0 0.10
-#define HSHARP params.HSHARP
-
-#pragma parameter MAXS "          Maximum Sharpness" 0.15 0.0 0.30 0.01
+#pragma parameter MAXS "          Maximum Sharpness" 0.20 0.0 0.30 0.01
 #define MAXS params.MAXS
 
-#pragma parameter HARNG "          Substractive Sharpness Ringing" 0.2 0.0 4.0 0.10
+#pragma parameter HARNG "          Substractive Sharpness Ringing" 0.3 0.0 4.0 0.10
 #define HARNG params.HARNG 
 
 #pragma parameter bogus_screen "[ SCREEN OPTIONS ]: " 0.0 0.0 1.0 1.0
@@ -100,6 +99,9 @@ layout(std140, set = 0, binding = 0) uniform UBO
 
 #pragma parameter c_shape "          Curvature Shape" 0.25 0.05 0.60 0.05
 #define c_shape        global.c_shape     // curvature shape
+
+#pragma parameter cbulge "          Curvature 3D Effect" 0.25 0.0 1.0 0.05
+#define cbulge        params.cbulge     // curvature bulge
 
 #pragma parameter overscanX "          Overscan X original pixels" 0.0 -200.0 200.0 1.0
 #define overscanX        global.overscanX     // OverscanX pixels
@@ -163,6 +165,9 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #pragma parameter clips "          Clip Saturated Color Beams" 0.0 -1.0 1.0 0.05
 #define clips  params.clips     // kinky effect
 
+#pragma parameter bloomsamp "          Bloom Pixel Sampling" 0.0 0.0 2.0 1.0
+#define bloomsamp  global.bloomsamp
+
 #pragma parameter bogus_scanline "[ SCANLINE OPTIONS ]: " 0.0 0.0 1.0 1.0
 
 #pragma parameter gsl "          Scanline Type" 0.0 -1.0 2.0 1.0
@@ -191,6 +196,9 @@ layout(std140, set = 0, binding = 0) uniform UBO
 
 #pragma parameter scan_falloff "          Scanline Falloff" 1.0 0.10 2.0 0.025
 #define scan_falloff        global.scan_falloff     // scanline falloff
+
+#pragma parameter ssharp "          Smart Sharpen Scanlines" 0.0 0.0 0.50 0.01
+#define ssharp global.ssharp
 
 #pragma parameter scangamma "          Scanline Gamma" 2.40 0.5 5.0 0.05
 #define scangamma global.scangamma
@@ -231,12 +239,13 @@ layout(set = 0, binding = 5) uniform sampler2D PrePass;
 
 #define eps 1e-10 
 
+float wts = (bloomsamp < 0.5) ? -10.0 : -12.5;
+
 float st(float x)
 {
-	return exp2(-10.0*x*x);
+	return exp2(wts*x*x);
 } 
 
- 
 vec3 sw0(float x, float color, float scanline, vec3 c)
 {
 	float tmp = mix(beam_min, beam_max, color);
@@ -280,8 +289,9 @@ vec2 Overscan(vec2 pos, float dx, float dy){
 
 vec2 Warp(vec2 pos)
 {
-	pos  = pos*2.0-1.0;    
-	pos  = mix(pos, vec2(pos.x*inversesqrt(1.0-c_shape*pos.y*pos.y), pos.y*inversesqrt(1.0-c_shape*pos.x*pos.x)), vec2(warpX, warpY)/c_shape);
+	pos  = pos*2.0-1.0;
+	pos = mix(pos, sign(pos)*pow(abs(pos), 1.0 + min(15.0*vec2(warpY,warpX)*cbulge.xx, cbulge.xx)), 0.075 + 0.125*(abs(pos)+pos*pos));
+	pos = mix(pos, vec2(pos.x*inversesqrt(1.0-c_shape*pos.y*pos.y), pos.y*inversesqrt(1.0-c_shape*pos.x*pos.x)), vec2(warpX, warpY)/c_shape);
 	return pos*0.5 + 0.5;
 }
 
@@ -310,6 +320,7 @@ vec3 v_resample (vec2 tex0, vec4 Size) {
 	vec3 cmin = 1.0.xxx;
 	float vsharpness = max(VSHARPNESS*internal_res, 0.6);
 	float sharp = gaussian(vsharpness) * S_SHARP;
+	float ksharp = -2.0*vsharpness*invsqrsigma*sharp;
 	float maxsharp = MAXS;
 	float FPR = vsharpness;
 	float FPRi = 1.0/vsharpness;
@@ -324,8 +335,8 @@ vec3 v_resample (vec2 tex0, vec4 Size) {
 		pixel  = COMPAT_TEXTURE(Pass1, tex + n*dy).rgb;
 
 		w = gaussian(n+f) - sharp;
-		fpx = (abs(n+f)-FPR)*FPRi;
-		if (w < 0.0) w = max(w, mix(-maxsharp, 0.0, pow(clamp(fpx,0.0,1.0), HSHARP)));
+		fpx = clamp((abs(n+f)-FPR)*FPRi, 0.0, 1.0);
+		if (w < 0.0) w = max(ksharp*fpx, maxsharp * ksharp * (1.0-fpx*fpx));
 		else { cmax = max(cmax, pixel); cmin = min(cmin, pixel); }
 
 		color = color + w * pixel;
@@ -438,8 +449,10 @@ void main()
 
 if (!interb || hscan)
 {	
-	float shape1 = mix(scanline1, scanline2, f);
-	float shape2 = mix(scanline1, scanline2, 1.0-f);
+	float ssub = ssharp*abs(scolor1.x-scolor2.x);
+
+	float shape1 = mix(scanline1, scanline2 + ssub * scolor1.x * 35.0, f);
+	float shape2 = mix(scanline1, scanline2 + ssub * scolor2.x * 35.0, 1.0-f);
 	
 	float wt1 = st(f);
 	float wt2 = st(1.0-f);
@@ -493,6 +506,27 @@ if (!interb || hscan)
 	
 	color = (gc(color1)*w1 + gc(color2)*w2);
 
+	if (bloomsamp > 0.5) {	
+		vec3 Bloom = COMPAT_TEXTURE(BloomPass, pos).rgb;
+		Bloom = pow(Bloom, vec3(scangamma/gamma_in));
+		float cm = max(max(ctmp.r,ctmp.g),ctmp.b);
+		float bm = max(max(Bloom.r,Bloom.g),Bloom.b);
+		float bmix = clamp(max((cm-bm), (bm-cm)/(cm+0.25)-cm), 0.0, 1.0);
+		if (abs(clips) > 0.005)
+		{
+			sy = cm + eps; one = (clips > 0.0) ? min(w1+w2,1.0) : 1.0.xxx;
+			cref1 = plant(Bloom,1.0);
+			float sat = 1.0001-min(min(cref1.r,cref1.g),cref1.b);
+			Bloom = mix(Bloom, plant(pow(Bloom, 0.70.xxx-0.325*sat),sy), pow(sat,0.3333)*one*abs(clips));
+		}
+		vec3 Bloom1 = (color1*wt1 + color2*wt2)/(wt1+wt2);
+		Bloom = mix(Bloom, Bloom1, min(2.5*abs(plant(sqrt(Bloom1),1.0) - plant(sqrt(Bloom),1.0)), 1.0));
+		bm = max(max(Bloom.r,Bloom.g),Bloom.b);
+		Bloom = plant(mix(Bloom,Bloom1,bloomsamp-1.0), mix(bm, 1.125*cm, bmix));	
+		Bloom = gc(Bloom)*(w1+w2);
+		color = min(mix(color, Bloom, pow(cm, mix(0.4, 0.2, pow(cm,0.375)))), max(Bloom,color));
+	}
+
 	color = min(color, 1.0);
 }
 	
@@ -503,7 +537,7 @@ if (!interb || hscan)
 
 	float colmx = max(max(ctmp.r,ctmp.g),ctmp.b);
 
-	color = pow( color, vec3(gamma_in/scangamma) );
+	color = pow(color, vec3(gamma_in/scangamma)); colmx = pow(colmx, gamma_in/scangamma);
   
 	FragColor = vec4(color, colmx);
 }

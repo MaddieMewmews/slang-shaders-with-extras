@@ -1,6 +1,6 @@
 shaders = "17"
 feedback_pass = "0"
-shader0 = "../../../../crt/shaders/crt-resswitch-glitch-koko.slang"
+shader0 = "../../../../crt/crt-effects/shaders/crt-resswitch-glitch-koko.slang"
 wrap_mode0 = "clamp_to_border"
 mipmap_input0 = "false"
 alias0 = ""

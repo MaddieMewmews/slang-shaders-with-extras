@@ -3,8 +3,12 @@
 /*
    CRT Advanced Afterglow, color altering
    
-   Copyright (C) 2019-2025 guest(r) and Dr. Venom
+   Copyright (C) 2019-2026 guest(r) and Dr. Venom
    
+   Sega MS Blue Lift and Sega MD Pallete Fix fixes inspired by Azurfel
+
+   contrast_sigmoid_inv function Copyright (C) 2020-2023 Dogway (Jose Linares) 
+
    This program is free software; you can redistribute it and/or
    modify it under the terms of the GNU General Public License
    as published by the Free Software Foundation; either version 2
@@ -19,13 +23,12 @@
    along with this program; if not, write to the Free Software
    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
    
-*/  
+*/ 
 
 layout(push_constant) uniform Push
 {
    vec4 SourceSize;
    vec4 OriginalSize;
-   vec4 OutputSize;
    uint FrameCount;
    float TNTC;
    float LS;
@@ -35,12 +38,15 @@ layout(push_constant) uniform Push
    float wp_saturation;
    float AS, agsat;
    float BP;
+   float BP1;
    float vigstr;
    float vigdef;
    float sega_fix;
    float pre_bb;
    float contr;
    float pre_gc;
+   float segams;
+   float segapal;
 } params;
 
 #pragma parameter AS "          Afterglow Strength" 0.20 0.0 0.60 0.01
@@ -80,7 +86,13 @@ layout(push_constant) uniform Push
 
 #pragma parameter sega_fix "          Sega Brightness Fix" 0.0 0.0 1.0 1.0
 
-#pragma parameter BP "          Raise Black Level" 0.0 -100.0 25.0 1.0
+#pragma parameter segams "          Sega MS Blue Lift" 0.0 0.0 1.0 1.0
+
+#pragma parameter segapal "          Sega MD Pallete Fix" 0.0 0.0 1.0 1.0
+
+#pragma parameter BP "          Lower Black Level" 0.0 -100.0 0.0 1.0
+
+#pragma parameter BP1 "          Raise Black Level" 0.0 0.0 25.0 1.0
 
 #pragma parameter vigstr "          Vignette Strength" 0.0 0.0 2.0 0.05
 
@@ -89,6 +101,7 @@ layout(push_constant) uniform Push
 #define WP params.WP
 #define wp_saturation params.wp_saturation
 #define BP params.BP
+#define BP1 params.BP1
 
 layout(std140, set = 0, binding = 0) uniform UBO
 {
@@ -257,6 +270,15 @@ vec3 pgc(vec3 c)
 	return c * mg/(mc + 1e-8);  
 }
 
+float contrast_sigmoid_inv(float imgColor, float cont, float pivot)
+{
+	cont = cont - 1.0; cont = cont*cont*cont;
+	float knee  = 1.0 / (1.0 + exp (cont *  pivot));
+	float shldr = 1.0 / (1.0 + exp (cont * (pivot - 1.0)));
+	imgColor = pivot - log(1.0 / (imgColor * (shldr - knee) + knee) - 1.0) / cont;
+	return imgColor;
+}
+
 void main()
 {
    vec4 imgColor = COMPAT_TEXTURE(StockPass, vTexCoord.xy);
@@ -266,9 +288,18 @@ void main()
 
    float l = length(aftglow.rgb);
    aftglow.rgb = AS*w*normalize(pow(aftglow.rgb + 0.01, vec3(sat)))*l;
-   float bp = w * BP/255.0;
+   float bp = w * BP1/255.0;
    
    if (params.sega_fix > 0.5) imgColor.rgb = imgColor.rgb * (255.0 / 239.0);
+   
+   if (params.segams > 0.5) { imgColor.b = (abs(imgColor.b - 0.375) < 0.125) ? 0.4078431372549019607843137254902 : imgColor.b; }
+
+   imgColor.rgb = min(imgColor.rgb, 1.0);
+   
+   if (params.segapal > 0.5) {
+   imgColor.r = contrast_sigmoid_inv(imgColor.r,2.578419881,0.520674); 
+   imgColor.g = contrast_sigmoid_inv(imgColor.g,2.578419881,0.520674); 
+   imgColor.b = contrast_sigmoid_inv(imgColor.b,2.578419881,0.520674); }
    
    imgColor.rgb = min(imgColor.rgb, 1.0);
    
@@ -378,10 +409,9 @@ void main()
 	color = pow(max(color, 0.0), vec3(1.0/p));
 	color = pgc(color);
 
-	if (BP > -0.5) color = color + aftglow.rgb + bp; else
-	{ 
-		color = max(color + BP/255.0, 0.0) / (1.0 + BP/255.0*step(- BP/255.0, max(max(color.r,color.g),color.b))) + aftglow.rgb;
-	}
+	float bp1 = min(BP, 0.0);
+	color = max(color + bp1/255.0, 0.0) / (1.0 + bp1/255.0*step(-bp1/255.0, max(max(color.r,color.g),color.b)));
+	color = color + aftglow.rgb + bp;
 	
 	color = min(color * params.pre_bb, 1.0);
 	

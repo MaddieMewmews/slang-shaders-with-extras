@@ -146,18 +146,7 @@ if (vTexCoord.x > 1.0) FragColor = 0.0.xxxx; else
  
    vec3 yiq = rgb2yiq(col);
    yiq.x = pow(yiq.x, params.ntsc_gamma);
-   float lum = yiq.x;
-
-if (params.ntsc_phase == 4.0) 
-{
-   vec2 dx = vec2(params.OriginalSize.z/auto_rez, 0.0);
-   float c1 = get_luma(texture(Source, vTexCoord - dx).rgb);
-   float c2 = get_luma(texture(Source, vTexCoord + dx).rgb);
-   float mix01 = min(5.0*abs(c1-c2),1.0);
-   c1 = pow(c1, params.ntsc_gamma);
-   c2 = pow(c2, params.ntsc_gamma);
-   yiq.x = mix(min(0.5*(yiq.x + max(c1,c2)), max(yiq.x , min(c1,c2))), yiq.x, mix01);
-}   
+   float lum = yiq.x; 
 
    vec3 tmp =  yiq; 
    vec3 yiq2 = yiq;	

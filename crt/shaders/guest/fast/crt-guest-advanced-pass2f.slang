@@ -58,6 +58,8 @@ layout(std140, set = 0, binding = 0) uniform UBO
 	float bloom_size;
 	float scans;
 	float post_br;
+	float cbulge;
+	float laysh;
 } global;
 
 
@@ -76,6 +78,9 @@ layout(std140, set = 0, binding = 0) uniform UBO
 
 #pragma parameter c_shape "          Curvature Shape" 0.25 0.05 0.60 0.05
 #define c_shape        global.c_shape     // curvature shape
+
+#pragma parameter cbulge "          Curvature 3D Effect" 0.25 0.0 1.0 0.05
+#define cbulge        global.cbulge     // curvature bulge
 
 #pragma parameter csize "          Corner Size" 0.0 0.0 0.25 0.01
 #define csize        global.csize     // corner size
@@ -176,8 +181,11 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #pragma parameter mshift "          (Transform to) Shadow Mask" 0.0 0.0 1.0 0.5
 #define mshift     global.mshift     // do the "shadow mask"
 
-#pragma parameter mask_layout "          Mask Layout: RGB or BGR (check LCD panel) " 0.0 0.0 1.0 1.0
-#define mask_layout     global.mask_layout     // mask layout: RGB or BGR
+#pragma parameter mask_layout "          Mask Layout Sequence: RGB or RBG (check LCD panel) " 0.0 0.0 1.0 1.0
+#define mask_layout     global.mask_layout     // mask layout: RGB or RBG
+
+#pragma parameter laysh "          Mask Layout Shift: GBR, RGB, BRG | GRB, RBG, BGR" 0.0 -1.0 1.0 1.0
+#define laysh     global.laysh     // mask layout shift
 
 #pragma parameter slotmask "          Slot Mask Strength Bright Pixels" 0.0 0.0 1.0 0.05
 #define slotmask     params.slotmask
@@ -510,8 +518,9 @@ vec2 Overscan(vec2 pos, float dx, float dy){
 
 vec2 Warp(vec2 pos)
 {
-	pos  = pos*2.0-1.0;    
-	pos  = mix(pos, vec2(pos.x*inversesqrt(1.0-c_shape*pos.y*pos.y), pos.y*inversesqrt(1.0-c_shape*pos.x*pos.x)), vec2(warpX, warpY)/c_shape);
+	pos  = pos*2.0-1.0;
+	pos = mix(pos, sign(pos)*pow(abs(pos), 1.0 + min(15.0*vec2(warpY,warpX)*cbulge.xx, cbulge.xx)), 0.075 + 0.125*(abs(pos)+pos*pos));
+	pos = mix(pos, vec2(pos.x*inversesqrt(1.0-c_shape*pos.y*pos.y), pos.y*inversesqrt(1.0-c_shape*pos.x*pos.x)), vec2(warpX, warpY)/c_shape);
 	return pos*0.5 + 0.5;
 }
 
@@ -734,7 +743,7 @@ if (shadowMask > -0.5)
 	
 	float mwidth = mwidths[int(shadowMask)];
 	if (shadowMask > 4.5) mask_compensate = 1.325;
-	vec2 maskcoord = gl_FragCoord.xy * 1.00001;
+	vec2 maskcoord = gl_FragCoord.xy * 1.00001 + vec2(laysh*masksize, 0.0);
 	vec2 scoord = maskcoord;
 	
 	mwidth = mwidth * masksize;

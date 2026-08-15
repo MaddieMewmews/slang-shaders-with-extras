@@ -3,7 +3,7 @@
 /*
    Gaussian blur - horizontal pass, dynamic range, resizable
    
-   Copyright (C) 2020 - 2025 guest(r)
+   Copyright (C) 2020 - 2026 guest(r)
 
    This program is free software; you can redistribute it and/or
    modify it under the terms of the GNU General Public License
@@ -40,8 +40,8 @@ float FINE_BLOOM = (params.FINE_BLOOM > 0.5) ? params.FINE_BLOOM : mix(0.75, 0.5
 #pragma parameter SIZEHB "          Horizontal Bloom/Halation Radius" 3.0 1.0 50.0 1.0 
 #define SIZEHB params.SIZEHB
 
-#pragma parameter SIGMA_HB "          Horizontal Bloom/Halation Sigma" 0.75 0.25 15.0 0.025
-#define SIGMA_HB params.SIGMA_HB
+#pragma parameter SIGMA_HB "          Horizontal Bloom/Halation Sigma" 0.75 0.25 2.0 0.01
+float SIGMA_HB = params.SIGMA_HB * SIZEHB / 3.0;
 
 layout(std140, set = 0, binding = 0) uniform UBO
 {

@@ -3,7 +3,7 @@
 /*
    Gaussian blur - horizontal pass, dynamic range, resizable
    
-   Copyright (C) 2020-2025 guest(r)
+   Copyright (C) 2020-2026 guest(r)
 
    This program is free software; you can redistribute it and/or
    modify it under the terms of the GNU General Public License
@@ -64,10 +64,10 @@ float auto_rez = (params.OriginalSize.y < 375.0) ? mix(1.0, 2.0, clamp(params.au
 float FINE_GLOW = (params.FINE_GLOW > 0.5) ? params.FINE_GLOW : mix(0.75, 0.5, -params.FINE_GLOW);
 
 #pragma parameter SIZEH "          Horizontal Glow Radius" 6.0 1.0 50.0 1.0 
-#define SIZEH params.SIZEH
+#define SIZEH params.SIZEH * auto_rez
 
-#pragma parameter SIGMA_H "          Horizontal Glow Sigma" 1.20 0.20 15.0 0.05
-#define SIGMA_H params.SIGMA_H
+#pragma parameter SIGMA_H "          Horizontal Glow Sigma" 1.20 0.20 3.0 0.01
+float SIGMA_H = params.SIGMA_H * SIZEH / 6.0;
 
 
 layout(std140, set = 0, binding = 0) uniform UBO
@@ -93,7 +93,7 @@ layout(set = 0, binding = 2) uniform sampler2D LinearizePass;
 
 #define COMPAT_TEXTURE(c,d) texture(c,d)
 
-float invsqrsigma = 1.0/(2.0*SIGMA_H*SIGMA_H*auto_rez*auto_rez);
+float invsqrsigma = 1.0/(2.0*SIGMA_H*SIGMA_H);
 
 float gaussian(float x)
 {
@@ -118,7 +118,7 @@ void main()
 	float w;
 	float wsum = 0.0;
 	vec3 pixel;
-	float n = -SIZEH * auto_rez;
+	float n = -SIZEH;
 
 	do
 	{
@@ -133,7 +133,7 @@ void main()
 		wsum   = wsum + w;
 		n = n + 1.0;
 		
-	} while (n <= SIZEH * auto_rez);
+	} while (n <= SIZEH);
 
 	color = color / wsum;
 	

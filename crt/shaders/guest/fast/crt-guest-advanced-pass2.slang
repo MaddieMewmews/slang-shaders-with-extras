@@ -3,7 +3,7 @@
 /*
    CRT - Guest - Advanced - Fast - Pass2
    
-   Copyright (C) 2018-2025 guest(r)
+   Copyright (C) 2018-2026 guest(r)
 
    Incorporates many good ideas and suggestions from Dr. Venom.
    I would also like give thanks to many Libretro forums members for continuous feedback, suggestions and using the shader.
@@ -26,7 +26,7 @@
 
 layout(push_constant) uniform Push
 {
-	float brightboost, brightboost1, gsl, scanline1, scanline2, beam_min, beam_max, beam_size,
+	float brightboost, brightboost1, gsl, scanline1, scanline2, beam_min, beam_max, beam_size, cbulge,
     glow, maskstr, inters, bloom, halation, scans, gamma_c, gamma_c2, gamma_out, IOS, no_scanlines, tds, clips, hiscan;
 } params;
 
@@ -56,6 +56,8 @@ layout(std140, set = 0, binding = 0) uniform UBO
 	float bmask1;
 	float hmask1;
 	float interm;
+	float ssharp;
+	float bloomsamp;
 } global;
 
 #pragma parameter interm "          Interlace Mode: OFF, Normal 1-3,6; Interpolation 4-5" 1.0 0.0 6.0 1.0
@@ -79,6 +81,9 @@ layout(std140, set = 0, binding = 0) uniform UBO
 
 #pragma parameter c_shape "          Curvature Shape" 0.25 0.05 0.60 0.05
 #define c_shape        global.c_shape     // curvature shape
+
+#pragma parameter cbulge "          Curvature 3D Effect" 0.25 0.0 1.0 0.05
+#define cbulge        params.cbulge     // curvature bulge
 
 #pragma parameter overscanX "          Overscan X original pixels" 0.0 -200.0 200.0 1.0
 #define overscanX        global.overscanX     // OverscanX pixels
@@ -142,6 +147,9 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #pragma parameter clips "          Clip Saturated Color Beams" 0.0 -1.0 1.0 0.05
 #define clips  params.clips     // kinky effect
 
+#pragma parameter bloomsamp "          Bloom Pixel Sampling" 0.0 0.0 2.0 1.0
+#define bloomsamp  global.bloomsamp
+
 #pragma parameter bogus_scanline "[ SCANLINE OPTIONS ]: " 0.0 0.0 1.0 1.0
 
 #pragma parameter gsl "          Scanline Type" 0.0 -1.0 2.0 1.0
@@ -170,6 +178,9 @@ layout(std140, set = 0, binding = 0) uniform UBO
 
 #pragma parameter scan_falloff "          Scanline Falloff" 1.0 0.10 2.0 0.05
 #define scan_falloff        global.scan_falloff     // scanline falloff
+
+#pragma parameter ssharp "          Smart Sharpen Scanlines" 0.0 0.0 0.50 0.01
+#define ssharp global.ssharp
 
 #pragma parameter no_scanlines "          No-scanline mode" 0.0 0.0 1.5 0.05
 #define no_scanlines params.no_scanlines
@@ -201,15 +212,12 @@ layout(set = 0, binding = 5) uniform sampler2D PrePass;
 
 #define eps 1e-10 
 
+float wts = (bloomsamp < 0.5) ? -10.0 : -12.5;
+
 float st(float x)
 {
-	return exp2(-10.0*x*x);
+	return exp2(wts*x*x);
 } 
-
-float st1(float x)
-{
-	return exp2(-8.0*x*x);
-}
 
 vec3 sw0(float x, float color, float scanline, vec3 c)
 {
@@ -254,8 +262,9 @@ vec2 Overscan(vec2 pos, float dx, float dy){
 
 vec2 Warp(vec2 pos)
 {
-	pos  = pos*2.0-1.0;    
-	pos  = mix(pos, vec2(pos.x*inversesqrt(1.0-c_shape*pos.y*pos.y), pos.y*inversesqrt(1.0-c_shape*pos.x*pos.x)), vec2(warpX, warpY)/c_shape);
+	pos  = pos*2.0-1.0;
+	pos = mix(pos, sign(pos)*pow(abs(pos), 1.0 + min(15.0*vec2(warpY,warpX)*cbulge.xx, cbulge.xx)), 0.075 + 0.125*(abs(pos)+pos*pos));
+	pos = mix(pos, vec2(pos.x*inversesqrt(1.0-c_shape*pos.y*pos.y), pos.y*inversesqrt(1.0-c_shape*pos.x*pos.x)), vec2(warpX, warpY)/c_shape);
 	return pos*0.5 + 0.5;
 }
 
@@ -348,8 +357,10 @@ void main()
 
 if (!interb)
 {	
-	float shape1 = mix(scanline1, scanline2, f);
-	float shape2 = mix(scanline1, scanline2, 1.0-f);
+	float ssub = ssharp*abs(scolor1.x-scolor2.x);
+
+	float shape1 = mix(scanline1, scanline2 + ssub * scolor1.x * 35.0, f);
+	float shape2 = mix(scanline1, scanline2 + ssub * scolor2.x * 35.0, 1.0-f);
 	
 	float wt1 = st(f);
 	float wt2 = st(1.0-f);
@@ -395,6 +406,27 @@ if (!interb)
 	}	
 	
 	color = (gc(color1)*w1 + gc(color2)*w2);
+
+	if (bloomsamp > 0.5) {	
+		vec3 Bloom = COMPAT_TEXTURE(BloomPass, pos).rgb;
+		float cm = max(max(ctmp.r,ctmp.g),ctmp.b);
+		float bm = max(max(Bloom.r,Bloom.g),Bloom.b);
+		float bmix = clamp(max((cm-bm), (bm-cm)/(cm+0.25)-cm), 0.0, 1.0);
+		if (abs(clips) > 0.005)
+		{
+			sy = cm + eps; one = (clips > 0.0) ? min(w1+w2,1.0) : 1.0.xxx;
+			cref1 = plant(Bloom,1.0);
+			float sat = 1.0001-min(min(cref1.r,cref1.g),cref1.b);
+			Bloom = mix(Bloom, plant(pow(Bloom, 0.70.xxx-0.325*sat),sy), pow(sat,0.3333)*one*abs(clips));
+		}
+		vec3 Bloom1 = (color1*wt1 + color2*wt2)/(wt1+wt2);
+		Bloom = mix(Bloom, Bloom1, min(2.5*abs(plant(sqrt(Bloom1),1.0) - plant(sqrt(Bloom),1.0)), 1.0));
+		bm = max(max(Bloom.r,Bloom.g),Bloom.b);
+		Bloom = plant(mix(Bloom,Bloom1,bloomsamp-1.0), mix(bm, 1.125*cm, bmix));	
+		Bloom = gc(Bloom)*(w1+w2);
+		color = min(mix(color, Bloom, pow(cm, mix(0.4, 0.2, pow(cm,0.375)))), max(Bloom,color));
+	}
+
 	color = min(color, 1.0);
 }
 	

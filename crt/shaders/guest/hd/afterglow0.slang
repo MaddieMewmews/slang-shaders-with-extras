@@ -103,7 +103,7 @@ if (params.esrc > 1.5)
 	float c = max(max(color0.r,color0.g),color0.b);
 	w = smoothstep(b, 2.0*b, c);
 
-	vec3 result = mix( max(mix(color, accumulate, 0.49 + vec3(PR, PG, PB))- 1.25/255.0, 0.0), color, w);
+	vec3 result = mix( max(mix(color, accumulate, 0.49 + vec3(PR, PG, PB))- 0.5/255.0, 0.0), color, w);
 
 	FragColor = vec4(result, w);
 }

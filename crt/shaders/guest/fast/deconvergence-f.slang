@@ -26,7 +26,7 @@
 
 layout(push_constant) uniform Push
 {
-	float IOS, brightboost, brightboost1, csize, bsize1, warpX, warpY, glow, shadowMask, masksize, hiscan,
+	float IOS, brightboost, brightboost1, csize, bsize1, warpX, warpY, glow, shadowMask, masksize, hiscan, cbulge,
 	slotmask, slotmask1, slotwidth, double_slot, mcut, maskDark, maskLight, maskstr, addnoised, noiseresd, barintensity, mshift, mask_layout, mask_bloom, pr_scan;
 } params;
 
@@ -79,6 +79,7 @@ layout(std140, set = 0, binding = 0) uniform UBO
 	float edgemask;
 	float oimage;
 	float interm;
+	float laysh;
 } global;
 
 #pragma parameter interm "          Interlace Mode: OFF, Normal 1-3,6; Interpolation 4-5" 1.0 0.0 6.0 1.0
@@ -153,6 +154,9 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #pragma parameter c_shape "          Curvature Shape" 0.25 0.05 0.60 0.05
 #define c_shape        global.c_shape     // curvature shape
 
+#pragma parameter cbulge "          Curvature 3D Effect" 0.25 0.0 1.0 0.05
+#define cbulge        params.cbulge     // curvature bulge
+
 #pragma parameter overscanX "          Overscan X original pixels" 0.0 -200.0 200.0 1.0
 #define overscanX        global.overscanX     // OverscanX pixels
 
@@ -188,8 +192,11 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #pragma parameter mshift "          (Transform to) Shadow Mask" 0.0 0.0 1.0 0.5
 #define mshift     params.mshift     // do the "shadow mask"
 
-#pragma parameter mask_layout "          Mask Layout: RGB or BGR (check LCD panel) " 0.0 0.0 1.0 1.0
-#define mask_layout     params.mask_layout     // mask layout: RGB or BGR
+#pragma parameter mask_layout "          Mask Layout Sequence: RGB or RBG (check LCD panel) " 0.0 0.0 1.0 1.0
+#define mask_layout     params.mask_layout     // mask layout: RGB or RBG
+
+#pragma parameter laysh "          Mask Layout Shift: GBR, RGB, BRG | GRB, RBG, BGR" 0.0 -1.0 1.0 1.0
+#define laysh     global.laysh     // mask layout shift
 
 #pragma parameter maskDark "          Lottes maskDark" 0.5 0.0 2.0 0.05
 #define maskDark     params.maskDark     // Dark "Phosphor"
@@ -511,8 +518,9 @@ float SlotMask(vec2 pos, float m, float swidth)
 
 vec2 Warp(vec2 pos)
 {
-	pos  = pos*2.0-1.0;    
-	pos  = mix(pos, vec2(pos.x*inversesqrt(1.0-c_shape*pos.y*pos.y), pos.y*inversesqrt(1.0-c_shape*pos.x*pos.x)), vec2(warpX, warpY)/c_shape);
+	pos  = pos*2.0-1.0;
+	pos = mix(pos, sign(pos)*pow(abs(pos), 1.0 + min(15.0*vec2(warpY,warpX)*cbulge.xx, cbulge.xx)), 0.075 + 0.125*(abs(pos)+pos*pos));
+	pos = mix(pos, vec2(pos.x*inversesqrt(1.0-c_shape*pos.y*pos.y), pos.y*inversesqrt(1.0-c_shape*pos.x*pos.x)), vec2(warpX, warpY)/c_shape);
 	return pos*0.5 + 0.5;
 }
 
@@ -711,7 +719,7 @@ if ((abs(global.deconrr) + abs(global.deconrry) + abs(global.deconrg) + abs(glob
 	
 if (shadowMask > -0.5)
 {	
-	vec2 maskcoord = gl_FragCoord.xy;
+	vec2 maskcoord = gl_FragCoord.xy + vec2(laysh*masksize, 0.0);
 	vec2 scoord = maskcoord;
 	
 	mwidth = floor(mwidth) * masksize;
