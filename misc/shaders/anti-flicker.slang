@@ -16,7 +16,7 @@
 	- Expanded the frame history to build a more stable temporal detection chain.
 	- Added an alternating frame color-lock to prevent false positives and tracking errors.
 	- Swapped to BT.601 luma weights to properly match 16bit and CRT-era specifications.
-	- Implemented a fast gamma approximation to replace expensive pow() calls.
+	- Implemented 1st-order Taylor series expansion to replace expensive pow() calls.
 	- Added an adjustable Flicker detection window to skip processing outside range.
 */
 
@@ -97,11 +97,14 @@ void main()
                 && (abs(prev2Luma - prev3Luma) > thresh)
                 && (abs(prev4Luma - prev5Luma) > thresh);
 				   
-    // Fast gamma approximation to avoid expensive pow(x, 2.2) and pow(x, 1.0/2.2)
-    // Precision loss: < 1% ; ALU cost: ~10x cheaper
-    vec3 blendedRgb = mix(curr0 * curr0, prev1 * prev1, 0.5);
-    blendedRgb = sqrt(blendedRgb);
-    
+	// Base summation & delta with dark-end curvature adjustment & noise-gating lock
+	vec3 sum = max(curr0, vec3(0.05)) + max(prev1, vec3(0.05));
+	vec3 inv_sum = vec3(1.0) / sum;
+	vec3 diff = curr0 - prev1;
+
+	// 1st-order Taylor series expansion
+	vec3 blendedRgb = sum * 0.5 + diff * diff * inv_sum * 0.25;
+
     vec3 finalRgb = flicker ? blendedRgb : curr0;
     
     FragColor = vec4(finalRgb, 1.0);
