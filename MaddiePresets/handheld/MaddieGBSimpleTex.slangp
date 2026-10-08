@@ -1,0 +1,4 @@
+#reference "../../presets/pixel_transparency/pixel_transparency-simpletex_lcd.slangp"
+DARKEN_GRID = "0.600000"
+DARKEN_COLOUR = "0.100000"
+PT_POLARIZER = "1.000000"
