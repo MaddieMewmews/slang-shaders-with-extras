@@ -40,9 +40,7 @@ layout(std140, set = 0, binding = 0) uniform UBO
 	mat4 MVP;
 } global;
 
-#pragma parameter lut_comment "=== Phosphor gamut settings (Legacy bridge version 1) ===" 0 0 0 1
-#pragma parameter lut_outdated_comment "== This old version is for compatibility with older presets ==" 0 0 0 1
-#pragma parameter lut_outdated_comment2 "== It is missing chromatic adaptation for Trinitron 8500K ==" 0 0 0 1
+#pragma parameter lut_comment "=== Phosphor gamut settings ===" 0 0 0 1
 #pragma parameter lut_toggle "Gamut: sRGB, P22-80s, P22-90s, P22-J, Trinitron P22" 4 0 4 1
 #pragma parameter lut_index "Ref. White: D65, C, 9300K+27MPCD, 8500K, CCT, (x,y), Measured" 1 0 6 1
 #pragma parameter lut_cct "Ref. White Custom CCT" 8000 4000 20000 100
@@ -74,6 +72,7 @@ layout(set = 0, binding = 5) uniform sampler2D PhosphorSamplerLUT3;
 layout(set = 0, binding = 6) uniform sampler2D PhosphorSamplerLUT4;
 layout(set = 0, binding = 7) uniform sampler2D PhosphorSamplerLUT5;
 layout(set = 0, binding = 8) uniform sampler2D PhosphorSamplerLUT6;
+layout(set = 0, binding = 9) uniform sampler2D PhosphorSamplerLUT7;
 
 #define saturate(c) clamp(c, 0.0, 1.0)
 
@@ -129,8 +128,8 @@ void main()
 	vec2 LUT_Size = textureSize(PhosphorSamplerLUT1, 0); // All are the same size... right?
 	vec3 imgColor = texture(Source, vTexCoord.xy).rgb;
 	
-	// Chromatic adaptation is available for P22-J and Trinitron P22 with 9300K+27MPCD.
-	bool doChromaAdapt = params.lut_toggle > 2.5 && params.lut_index > 1.5 && params.lut_index < 2.5 && params.lut_chroma_adapt > 0.5;
+	// Chromatic adaptation is available for P22-J with 9300K+27MPCD and Trinitron P22 with either 9300K+27MPCD or 8500K
+	bool doChromaAdapt = params.lut_toggle > 2.5 && params.lut_index > 1.5 && (params.lut_index < 2.5 || (params.lut_index < 3.5 && params.lut_toggle > 3.5)) && params.lut_chroma_adapt > 0.5;
     
 	bool doTerrible = params.terrible_gamut_mode > 0.5;
 	
@@ -264,8 +263,12 @@ void main()
 	if(doChromaAdapt) {
 	    if(params.lut_toggle < 3.5) { // P22-J 9300K+27MPCD
             eightSamples(PhosphorSamplerLUT5);
-        } else { // Trinitron P22 9300K+27MPCD
-            eightSamples(PhosphorSamplerLUT6);
+        } else { // Trinitron P22
+	        if(params.lut_index < 2.5) { // 9300K+27MPCD
+                eightSamples(PhosphorSamplerLUT6);
+            } else { // 8500K
+	            eightSamples(PhosphorSamplerLUT7);
+            }
         }
     } else {
 	    if(params.lut_toggle < 1.5) {

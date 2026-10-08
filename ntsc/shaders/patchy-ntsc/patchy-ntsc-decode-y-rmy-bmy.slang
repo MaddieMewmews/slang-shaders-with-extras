@@ -13,6 +13,7 @@ You should have received a copy of the GNU General Public License along with thi
 */
 
 // This pass lowpasses R-Y and B-Y and combines the result with Y to get RGB with corrections taken from jungle chips that actually existed, taking the knobs/on-screen-display settings into account.
+// The RGB values are scaled and optionally clamped to prepare for smearing in the next pass.
 
 layout(push_constant) uniform Push
 {
@@ -58,9 +59,22 @@ void main()
         rmybmy = texture(Source, vTexCoord).gb;
     }
     
+    if(global.pn_demodulator_luma_test > 0.5) {
+        vec2 uv = bmyRmyToYuvMatrix() * rmybmy;
+        float sat = sqrt(pow(uv.x, 2) + pow(uv.y, 2));
+        float val = sat / global.pn_demodulator_luma_test_threshold * (global.pn_demodulator_luma_test < 1.5 ? 30 : 1);
+        if(val < 0.52)
+            FragColor = vec4(val, 0, 0, 1);
+        else if(val > 0.56)
+            FragColor = vec4(0, val, 0, 1);
+        else
+            FragColor = vec4(val);
+        return;
+    }
+    
     vec3 rgb;
     
-    if(global.pn_nes_enable > 0.5 && global.pn_nes_real_capture > 0.5) {
+    if(NES_ENABLE && global.pn_nes_real_capture > 0.5) {
         rgb = nesRealCaptureLookup(vec3(y, rmybmy), global.pn_knob_saturation);
     } else {
         rgb = YBmyRmyToRGBMatrix() * vec3(y, rmybmy * global.pn_knob_saturation);

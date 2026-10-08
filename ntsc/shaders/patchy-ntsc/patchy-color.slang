@@ -12,6 +12,9 @@ You should have received a copy of the GNU General Public License along with thi
 
 */
 
+// A simple, very haphazardly rushed shader that combines all the color-altering functionality from Patchy-NTSC.
+// This pass's code is a total mess. I am planning to do a major overhaul of patchy-ntsc that will reuse code better and get rid of all the mess.
+
 layout(push_constant) uniform Push
 {
     vec4 SourceSize;
@@ -28,6 +31,7 @@ layout(std140, set = 0, binding = 0) uniform UBO
     float pc_unused1;
     float pc_unused2;
     float pc_testpattern;
+    float pc_testpattern_split;
     float pc_expose_demod_clamp_max;
     float pc_expose_demod_clamp_min;
     float pc_unused3;
@@ -39,9 +43,11 @@ layout(std140, set = 0, binding = 0) uniform UBO
     float pc_nes_version;
 //    float pc_nes_alt_voltages;
     float pc_genesis_needfix;
+    float pc_sms_bluelift;
     float pc_unused4;
     float pc_enableComposite;
     float pc_demodulator;
+    float pc_yuvsyncnew;
     float pc_r_off;
     float pc_r_amp;
     float pc_g_off;
@@ -62,27 +68,31 @@ layout(std140, set = 0, binding = 0) uniform UBO
 
 #pragma parameter pc_unused2 "== Test patterns ==" 0 0 0 1
 #pragma parameter pc_testpattern "Test pattern selection (0 = off)" 0 0 5 1
-//#pragma parameter pc_expose_demod_clamp_max "Reveal clamped color over 1.0 from demodulator conversion" 0 0 1 1
+#pragma parameter pc_testpattern_split "Split test pattern (when applicable)" 0 0 1 1
+#pragma parameter pc_expose_demod_clamp_max "(When test pattern is on) Reveal clamped color over 1.0" 0 0 1 1
 //#pragma parameter pc_expose_demod_clamp_min "Reveal clamped color under 0.0 from demodulator conversion" 0 0 1 1
 
 #pragma parameter pc_unused3 "== Console settings (Does work with test patterns) ==" 0 0 0 1
-#pragma parameter pc_console "Console: Other | Gen/MD | NES/FC (raw palette)" 0 0 2 1
+#pragma parameter pc_console_notice "NOTICE: You MUST set Console right for these options to work" 0 0 0 1
+#pragma parameter pc_console "Console: Other | Gen/MD | NES/FC (raw palette) | SMS" 0 0 3 1
 #pragma parameter pc_nes_lut "NES: Use real capture (probably 2C02G) | Use formulas" 0 0 1 1
 #pragma parameter pc_nes_version "NES PPU formula: 2C02G (NTSC) | 2C02E (NTSC) | PAL" 0 0 2 1
 //#pragma parameter pc_nes_alt_voltages "(Reccomend 0 (off)) NES: Use outdated voltages" 0 0 1 1
 #pragma parameter pc_genesis_needfix "MD emu: BlastEm (Leave as-is) | GenPlusGX (Apply correction)" 0 0 1 1
+#pragma parameter pc_sms_bluelift "SMS blue lift" 0 0 1 1
 
 #pragma parameter pc_unused4 "=== Composite video demodulation controls ===" 0 0 0 1
 #pragma parameter pc_enableComposite "Enable composite demodulator simulation" 1.0 0.0 1.0 1.0
 #pragma parameter pc_demodulator "Demodulator (0: BT.470, 1: BT.709, 2-3: JP, 4-8: US, 9: Custom)" 0 0 9 1
+#pragma parameter pc_yuvsyncnew "Default hue rotation: Averaged | Eyeballed" 0 0 1 1
 #pragma parameter pc_r_off "Custom R-Y offset" 112 90 130 1
 #pragma parameter pc_r_amp "Custom R-Y gain" 0.84 0.0 1.00 0.01
 #pragma parameter pc_g_off "Custom G-Y offset" 235 200 300 1
 #pragma parameter pc_g_amp "Custom G-Y gain" 0.33 0.0 1.00 0.01
 
 #pragma parameter pc_unused5 "=== End-user color tuning knobs ===" 0 0 0 1
-#pragma parameter pc_contrast "Contrast (Rec. about 0.8 to 0.9.)" 0.85 0 2 0.025
-#pragma parameter pc_brightness "Brightness (Black level)" -0.05 -0.5 0.5 0.01
+#pragma parameter pc_contrast "Contrast (Be careful about clamping!)" 0.7 0 2 0.025
+#pragma parameter pc_brightness "Brightness (Black level)" 0.15 -0.5 0.5 0.01
 #pragma parameter pc_color "Color (Saturation)" 1 0 4 0.025
 #pragma parameter pc_tint "Tint (Hue Rotation) (Rec. exactly 0.0)" 0 -45 45 0.5
 
@@ -150,6 +160,13 @@ vec3 fixGenColor(vec3 src) {
 //         hi = res;
 //   }
 //   return (src - lo) / (hi - lo);
+}
+
+vec3 smsBlueLift(vec3 src) {
+    // I don't know if anyone has correct numbers for this anywhere on the Internet.
+    // I have taken this conversion from Dogway's Grading Shader, but I haven't seen a reliable source for it.
+    
+    return vec3(src.rg, pow(src.b, 1.0/1.16)); // Don't know why they put 1.0/1.16 when they could've put 0.862.
 }
 
 // NES color decoding adapted from GTU-famicom by aliaspider
@@ -741,14 +758,10 @@ mat3x2 yuvAxisPoints() {
                  b_off, b_max);
 }
 
-mat3 yuvAxisMatrix() {
-
-   mat3x2 yuvAxisPts = yuvAxisPoints();
-   
-//   if(global.pc_console < 1.5) {
+mat3x2 yuvSyncAvg(mat3x2 yuvAxisPts) {
+//   if(global.eztvcol3_cmp_console < 1.5) {
 //       // This code is made using the mathematical formulas outlined by Chthon at https://forums.libretro.com/t/dogways-grading-shader-slang/27148/561
-//       // It might look like we can replace the presets with pre-determined matrices, but if the user sets their own hue offset, we'll need to recalculate the matrix. Not a huge deal though since the code is already fast.
-//       // The TV's color and tint dials (saturation and hue rotation) are included in the calculation from yuvAxisPoints() above.
+//       // The result is an RGB to RGB matrix.
 //
 //       float xr, yr, xg, yg, xb, yb;
 //       xr = yuvAxisPts[0][1] * cos(yuvAxisPts[0][0]);
@@ -782,6 +795,211 @@ mat3 yuvAxisMatrix() {
 //          1 - (cr.r + wr + cr.g + wg), 1 - (cg.r + wr + cg.g + wg), 1 - (cb.r + wr + cb.g + wg)
 //       );
 //   } else {
+    
+    // This simpler code generates a YUV to RGB matrix.
+    float xr, yr, xg, yg, xb, yb;
+    xr = yuvAxisPts[0][1] * cos(yuvAxisPts[0][0]);
+    yr = yuvAxisPts[0][1] * sin(yuvAxisPts[0][0]);
+    xg = yuvAxisPts[1][1] * cos(yuvAxisPts[1][0]);
+    yg = yuvAxisPts[1][1] * sin(yuvAxisPts[1][0]);
+    xb = yuvAxisPts[2][1] * cos(yuvAxisPts[2][0]);
+    yb = yuvAxisPts[2][1] * sin(yuvAxisPts[2][0]);
+
+    mat3 toRgb = mat3(1,  1,  1,
+                      xr, xg, xb,
+                      yr, yg, yb);
+
+    mat3 fromRgb = inverse(toRgb);
+    mat3 fromRgbStd;
+
+    //    if(global.pn_modulator_std < 0.5) {
+        // Rec. 601 YUV matrix
+        // This is used in the Genesis/MegaDrive and SNES/SFC
+        fromRgbStd = mat3x3(
+                    0.299, -0.14713, 0.615,
+                    0.587, -0.28886, -0.51499,
+                    0.114, 0.436, -0.10001
+                 );
+    //    } else {
+    //        // Rec. 709 YUV matrix
+    //        // Don't know any specific consoles using this, but I assume this *eventually* became common.
+    //        fromRgbStd = mat3(0.2126, -0.09991, 0.615,
+    //                      0.7152, -0.33609, -0.55861,
+    //                      0.0722, 0.436, -0.05639);
+    //    }
+                           
+    // Basic linear regression to match the hue rotation (tint) to standard color bars.
+    // Simply average up the offsets, and that's the ideal hue rotation.
+    // On US CRTs, many people probably rotated this further to get greener greens, but then, some green would become very cyan, and some reds and pinks would become very orange.
+    // Other people on US CRTs, especially on the NES, probably rotated a little in the opposite direction to get browner browns.
+    // A problem with this method is that this is not a perceptually uniform color space. I will address that sometime else.
+
+    float residSum = 0;
+    for(int i = 1; i <= 6; i++) {
+        vec3 colorBar = vec3(i & 1, (i >> 1) & 1, i >> 2);
+        vec3 yuvJungle = fromRgb * colorBar;
+        vec3 yuvStd = fromRgbStd * colorBar;
+        float resid = atan(yuvJungle.b, yuvJungle.g) - atan(yuvStd.b, yuvStd.g);
+        while(resid > pi)
+            resid -= 2 * pi;
+        while(resid < -pi)
+            resid += 2 * pi;
+        residSum += resid;
+    }
+
+    float hueOff = -residSum / 6;
+
+    for(int i = 0; i < 3; i++)
+        yuvAxisPts[i][0] += hueOff;
+
+
+    xr = yuvAxisPts[0][1] * cos(yuvAxisPts[0][0]);
+    yr = yuvAxisPts[0][1] * sin(yuvAxisPts[0][0]);
+    xg = yuvAxisPts[1][1] * cos(yuvAxisPts[1][0]);
+    yg = yuvAxisPts[1][1] * sin(yuvAxisPts[1][0]);
+    xb = yuvAxisPts[2][1] * cos(yuvAxisPts[2][0]);
+    yb = yuvAxisPts[2][1] * sin(yuvAxisPts[2][0]);
+
+    toRgb = mat3(1,  1,  1,
+                 xr, xg, xb,
+                 yr, yg, yb);
+
+    fromRgb = inverse(toRgb);
+
+    // Old least-squares linear regression to match the saturation to the color bars.
+    // We have an equation R = Summation for each of 6 bars: ((This Bar's Saturation in Jungle Chip) * (Saturation Factor) - (This Bar's Standard Saturation))^2
+    // Meaning, R is the sum of squared differences in saturations. It's a subtraction, not a ratio.
+    // Leaving (Saturation Factor) as a variable and simplifying down, the equation is in the format R = A(Saturation Factor)^2 + B(Saturation Factor) + C.
+    // The value of (Saturation Factor) that minimizes R is in the center of the parabola, or -B/(2*A). The value C is never used, so we don't calculate it.
+
+    //    float Aval = 0;
+    //    float Bval = 0;
+    //    for(int i = 1; i <= 6; i++) {
+    //        vec3 colorBar = vec3(i & 1, (i >> 1) & 1, i >> 2);
+    //        vec3 yuvJungle = fromRgb * colorBar;
+    //        vec3 yuvStd = fromRgbStd * colorBar;
+    //        Aval += pow(yuvJungle.g, 2) + pow(yuvJungle.b, 2);
+    //        Bval += 2 * sqrt(pow(yuvJungle.g, 2) + pow(yuvJungle.b, 2)) * -sqrt(pow(yuvStd.g, 2) + pow(yuvStd.b, 2));
+    //    }
+    //    
+    //    float satFix = -Bval / (2 * Aval);
+
+    //    toRgb[0] *= 1; // Have to add this line here because some GPU drivers force you to multiply all 3 columns together.
+    //    toRgb[1] /= satFix;
+    //    toRgb[2] /= satFix;
+
+    // New geometric mean to match the saturation to the color bars.
+    // Take the proportion of the change on each color bar.
+    // Then, take the geometric mean of those six proportions.
+    // This has a better result than the linear regression above because saturation is not linear.
+    // A problem with this method is that this is not a perceptually uniform color space. I will address that sometime else.
+
+    float prop = 1.0;
+    for(int i = 1; i <= 6; i++) {
+        vec3 colorBar = vec3(i & 1, (i >> 1) & 1, i >> 2);
+        vec3 yuvJungle = fromRgb * colorBar;
+        vec3 yuvStd = fromRgbStd * colorBar;
+        float satJungle = sqrt(pow(yuvJungle.g, 2) + pow(yuvJungle.b, 2));
+        float satStd = sqrt(pow(yuvStd.g, 2) + pow(yuvStd.b, 2));
+        prop *= satJungle / satStd; // What saturation do we set to make this bar match in saturation?
+    }
+
+    prop = pow(prop, 1.0/6.0); // Geometric mean of those proportional errors.
+
+    for(int i = 0; i < 3; i++)
+        yuvAxisPts[i][1] *= prop;
+    
+    return yuvAxisPts;
+//   }
+}
+
+mat3x2 yuvSyncEyeballed(mat3x2 yuvAxisPts) {
+    // Standard matrices that are already sync'd
+    if(global.pc_demodulator < 1.5) {
+        return yuvAxisPts;
+    }
+    
+    // DISCLAIMER: I do not own CRTs with these chips at the moment.
+    // These settings represent my own personal opinion about what settings look
+    // best for decoding a 90s console's color.
+    
+    float hue, sat;
+    if(global.pc_demodulator < 1.5) {
+        // Standard YUV matrices are already perfect.
+        hue = 0.0;
+        sat = 1.0;
+    } else if(global.pc_demodulator < 2.5) {
+        // CXA2025AS JP
+        // The best calibration turned out to be no change at all.
+        hue = 0.0;
+        sat = 1.0;
+    } else if(global.pc_demodulator < 3.5) {
+        // CXA1464AS
+        // The best calibration turned out to be no change at all.
+        hue = 0;
+        sat = 1.0;
+    } else if(global.pc_demodulator < 4.5) {
+        // TA7698AP
+        // Sync'd against the averaged matrix
+        // Same settings as TA8867BN due to similarity of the chips' numbers.
+        yuvAxisPts = yuvSyncAvg(yuvAxisPts);
+        hue = -5;
+        sat = 1.05;  
+    } else if(global.pc_demodulator < 5.5) {
+        // TA8867BN
+        // Sync'd against the averaged matrix
+        // This one is set up to be faithful-ish to my 1989 RCA ColorTrak Remote.
+        // The ground in Battletoads looks green, while the ground in Duck Hunt looks more brown.
+        // Saturation set based on Mortal Kombat.
+        // Intended brightness setting is 0.15.
+        yuvAxisPts = yuvSyncAvg(yuvAxisPts);
+        hue = -5;
+        sat = 1.05;
+    } else if(global.pc_demodulator < 6.5) {
+        // TA8867AN
+        // Sync'd against the averaged matrix.
+        // For this one, I was looking at Mortal Kombat, trying to make the skin tones look similar to the TA8867BN.
+        yuvAxisPts = yuvSyncAvg(yuvAxisPts);
+        hue = 0;
+        sat = 1.05;
+    } else if(global.pc_demodulator < 7.5) {
+        // CXA2025AS US
+        // Sync'd against the averaged matrix.
+        // Looked at Mortal Kombat for this one too.
+        // These Sony CXA US ones look so awful.
+        // They have another feature called Dynamic Color. For now, I'm assuming that feature makes the output actually good.
+        yuvAxisPts = yuvSyncAvg(yuvAxisPts);
+        hue = -2.5;
+        sat = 1.0;
+    } else if(global.pc_demodulator < 8.5) {
+        // CXA1465AS US
+        // Sync'd against the averaged matrix
+        // Used same settings as CXA2025AS US because the chips' numbers are so close.
+        yuvAxisPts = yuvSyncAvg(yuvAxisPts);
+        hue = -2.5;
+        sat = 1.0;
+    } else {
+        // Custom. Let the user figure it out.
+        hue = 0.0;
+        sat = 1.0;
+    }
+    
+    for(int i = 0; i < 3; i++) {
+        yuvAxisPts[i][0] += hue / 180.0 * pi;
+        yuvAxisPts[i][1] *= sat;
+    }
+
+    return yuvAxisPts;
+}
+
+
+mat3 yuvAxisMatrix() {
+    mat3x2 yuvAxisPts;
+    if(global.pc_yuvsyncnew > 0.5) {
+       yuvAxisPts = yuvSyncEyeballed(yuvAxisPoints());
+    } else {
+       yuvAxisPts = yuvSyncAvg(yuvAxisPoints());
+   }
 
     // This simpler code generates a YUV to RGB matrix.
     float xr, yr, xg, yg, xb, yb;
@@ -796,83 +1014,7 @@ mat3 yuvAxisMatrix() {
                       xr, xg, xb,
                       yr, yg, yb);
     
-    mat3 fromRgb = inverse(toRgb);
-    mat3 fromRgbStd = mat3(0.299, -0.14713, 0.615, // Standard YUV matrix from BT.470
-                           0.587, -0.28886, -0.51499,
-                           0.114, 0.436, -0.10001);
-                           
-    // Basic linear regression to match the hue to the color bars.
-    
-    float residSum = 0;
-    for(int i = 1; i <= 6; i++) {
-        vec3 colorBar = vec3(i & 1, (i >> 1) & 1, i >> 2);
-        vec3 yuvJungle = fromRgb * colorBar;
-        vec3 yuvStd = fromRgbStd * colorBar;
-        float resid = atan(yuvJungle.b, yuvJungle.g) - atan(yuvStd.b, yuvStd.g);
-        while(resid > pi)
-            resid -= 2 * pi;
-        while(resid < -pi)
-            resid += 2 * pi;
-        residSum += resid;
-    }
-    
-    float hueOff = -residSum / 6;
-    
-    for(int i = 0; i < 3; i++)
-        yuvAxisPts[i][0] += hueOff;
-    
-    
-    xr = yuvAxisPts[0][1] * cos(yuvAxisPts[0][0]);
-    yr = yuvAxisPts[0][1] * sin(yuvAxisPts[0][0]);
-    xg = yuvAxisPts[1][1] * cos(yuvAxisPts[1][0]);
-    yg = yuvAxisPts[1][1] * sin(yuvAxisPts[1][0]);
-    xb = yuvAxisPts[2][1] * cos(yuvAxisPts[2][0]);
-    yb = yuvAxisPts[2][1] * sin(yuvAxisPts[2][0]);
-
-    toRgb = mat3(1,  1,  1,
-                 xr, xg, xb,
-                 yr, yg, yb);
-    
-    fromRgb = inverse(toRgb);
-
-    // Old least squares linear regression to match the hue to the color bars.
-    
-//    float Aval = 0;
-//    float Bval = 0;
-//    for(int i = 1; i <= 6; i++) {
-//        vec3 colorBar = vec3(i & 1, (i >> 1) & 1, i >> 2);
-//        vec3 yuvJungle = fromRgb * colorBar;
-//        vec3 yuvStd = fromRgbStd * colorBar;
-//        Aval += pow(yuvJungle.g, 2) + pow(yuvJungle.b, 2);
-//        Bval += 2 * sqrt(pow(yuvJungle.g, 2) + pow(yuvJungle.b, 2)) * -sqrt(pow(yuvStd.g, 2) + pow(yuvStd.b, 2));
-//    }
-//    
-//    float satFix = -Bval / (2 * Aval);
-
-    // New geometric mean to match the saturation to the color bars.
-    // Take the proportion of the change on each color bar.
-    // Then, take the geometric mean of those six proportions.
-    // This has a better result than the linear regression above because saturation is not linear.
-    
-    float prop = 1.0;
-    for(int i = 1; i <= 6; i++) {
-        vec3 colorBar = vec3(i & 1, (i >> 1) & 1, i >> 2);
-        vec3 yuvJungle = fromRgb * colorBar;
-        vec3 yuvStd = fromRgbStd * colorBar;
-        float satJungle = sqrt(pow(yuvJungle.g, 2) + pow(yuvJungle.b, 2));
-        float satStd = sqrt(pow(yuvStd.g, 2) + pow(yuvStd.b, 2));
-        prop *= satJungle / satStd; // What saturation do we set to make this bar match in saturation?
-    }
-    
-    prop = pow(prop, 1.0/6.0); // Geometric mean of those proportional errors.
-    
-    return toRgb * mat3(
-        1, 0, 0,
-        0, prop, 0,
-        0, 0, prop
-    );
-    
-//   }
+    return toRgb;
 }
 
 float nesMaxRgb() {
@@ -916,6 +1058,81 @@ vec3 EOTF_1886a_default_f3(vec3 color, float brightness, float contrast) {
     color.g = EOTF_1886a_default(color.g, brightness, contrast);
     color.b = EOTF_1886a_default(color.b, brightness, contrast);
     return color;
+}
+
+vec3 smpteBarsSplit(vec2 pos) {
+   float wholeRamp = pos.x * 8;
+   float flooredWholeRamp = floor(pos.x * 8);
+   if(pos.y < 0.75) {
+      if(pos.y < 0.75 / 2)
+         return vec3(-43);
+      // Standard color bars. Top is 75%; bottom is 100%.
+      int index = 7 - int(flooredWholeRamp + 0.5);
+      return vec3((index & 2) >> 1, index >> 2, index & 1);
+   } else if(pos.x > 0.875) {
+      if(pos.y < (0.75 + 1.0) / 2.0)
+         return vec3(-43);
+      // Standard mini-pluge for syncing the black level
+      float partialRamp = wholeRamp - flooredWholeRamp;
+      float steppedPartialRamp = floor(partialRamp * 3);
+      return vec3((steppedPartialRamp - 1.0) * 0.075);
+   } else {
+      // Deeper pluge for setting a nonstandard brightness
+      float normPos = pos.x / 0.875;
+      float normY = (pos.y - 0.75) / 0.25;
+      
+      if(mod(normY, 0.25) < 0.125)
+         return vec3(-43);
+
+      float steppedPos = floor(normPos * 21);
+      float finalRamp = (steppedPos - 10) / 10;
+      
+      if(normY < 0.25) {
+         return vec3(finalRamp, 0, 0);
+      } else if(normY < 0.5) {
+         return vec3(0, finalRamp, 0);
+      } else if(normY < 0.75) {
+         return vec3(0, 0, finalRamp);
+      } else {
+         return vec3(finalRamp);
+      }
+   }
+}
+
+vec3 colorRampsSplit(vec2 pos) {
+    int x = int(pos.x * 17);
+    int y = int(pos.y * 15);
+    
+    if(x == 0 || x == 16 || (y & 1) == 1) { // Changed (y & 1) == 0 to (y & 1) == 1
+        return vec3(-43);
+    } else {
+        // Red, green, blue, and white are grouped together on purpose.
+        vec3 primaries[] = {
+            vec3(1, 1, 1),
+            vec3(1, 0, 0),
+            vec3(0, 1, 0),
+            vec3(0, 0, 1),
+            vec3(0, 1, 1),
+            vec3(1, 0, 1),
+            vec3(1, 1, 0),
+            vec3(0, 0, 0) // Added an eighth as failsafe
+        };
+        return mix(vec3(0), primaries[y >> 1], x / 15.0);
+    }
+}
+
+vec3 testPatternSplit(vec2 pos) {
+    if(global.pc_testpattern < 1.5) {
+        return smpteBarsSplit(pos);
+    } else if(global.pc_testpattern < 2.5) {
+        return colorRampsSplit(pos);
+    } else if(global.pc_testpattern < 3.5) {
+        return vec3(-43);
+    } else if(global.pc_testpattern < 4.5) {
+        return vec3(-43);
+    } else {
+        return vec3(-43);
+    }
 }
 
 // CRT EOTF Function
@@ -1059,16 +1276,17 @@ vec3 nesFullPalette(vec2 pos) {
 }
 
 vec3 testPattern(vec2 pos) {
-    if(global.pc_testpattern < 2.5) {
+    if(global.pc_testpattern < 1.5) {
+        return smpteBars(pos);
+    } else if(global.pc_testpattern < 2.5) {
         return colorRamps(pos);
     } else if(global.pc_testpattern < 3.5) {
         return hsvSpectrum(pos, false);
     } else if(global.pc_testpattern < 4.5) {
         return hsvSpectrum(pos, true);
-    } else if(global.pc_testpattern < 5.5) {
+    } else {
         return nesFullPalette(pos);
     }
-    else return smpteBars(pos);
 }
 
 // These two sRGB functions are taken from shaders_slang/include/colorspace-tools.h
@@ -1129,11 +1347,15 @@ void main()
     
     if(global.pc_console > 0.5) {
         if(global.pc_console < 1.5) { // Sega Genesis / MegaDrive
-            if(global.pc_genesis_needfix > 0.5 && global.pc_testpattern < 0.5) // Genesis gamma correction--BlastEm already performs this fix for you
+            if(global.pc_genesis_needfix > 0.5 && global.pc_testpattern < 0.5) { // Genesis gamma correction--BlastEm already performs this fix for you
                 changedColor = fixGenColor(changedColor);
-        }
-            else if(global.pc_console < 2.5) { // NES PPU
-                changedColor = retreiveNesColorYuv(changedColor);
+            }
+        } else if(global.pc_console < 2.5) { // NES PPU
+            changedColor = retreiveNesColorYuv(changedColor);
+        } else if(global.pc_console < 3.5) { // SMS
+            if(global.pc_sms_bluelift > 0.5) {
+                changedColor = smsBlueLift(changedColor);
+            }
         }
     }
 
@@ -1144,7 +1366,7 @@ void main()
                           0.114, 0.436, -0.10001);
         mat3 toRgb = yuvAxisMatrix();
         
-        if(global.pc_console < 1.5)
+        if(global.pc_console < 1.5 || global.pc_console > 2.5) // Everything except NES
             changedColor = toYuv * changedColor;
             
         float tint = -global.pc_tint * pi / 180.0;
@@ -1157,6 +1379,12 @@ void main()
         changedColor = toRgb * changedColor;
     }
     
+    if(global.pc_testpattern_split > 0.5 && global.pc_testpattern > 0.5) {
+        vec3 rgb2 = testPatternSplit(v_texcoord0);
+        if(rgb2 != vec3(-43))
+            changedColor = rgb2;
+    }
+    
     if(global.pc_gamma_type < 0.5) {
         changedColor = EOTF_1886a_f3(changedColor, CRT_l, global.pc_brightness, global.pc_contrast);
     } else if(global.pc_gamma_type < 1.5) {
@@ -1167,6 +1395,10 @@ void main()
         float contr = global.pc_contrast <= 1.001 ? linear_to_sRGB(vec3(global.pc_contrast), 2.4).r : 1.055 * pow(global.pc_contrast, 1.0 / 2.4) - 0.055; // 2.4 instead of 2.2 is not a mistake.
         changedColor = (changedColor + global.pc_brightness) / (1 + global.pc_brightness) * contr;
         changedColor = sRGB_to_linear(changedColor, 2.4); // Beware that this function clamps between 0 and 1.
+    }
+    
+    if(global.pc_expose_demod_clamp_max > 0.5 && global.pc_testpattern > 0.5 && (changedColor.r > 1.001 || changedColor.g > 1.001 || changedColor.b > 1.001)) {
+        changedColor = vec3(1) - changedColor;
     }
     
     FragColor = vec4(clamp(changedColor, 0, 1), originalColor.a);

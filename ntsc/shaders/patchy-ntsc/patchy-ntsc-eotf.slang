@@ -15,7 +15,7 @@ You should have received a copy of the GNU General Public License along with thi
 // This pass performs two steps: (Optionally) smear over the bright colors, then linearize the final RGB to prepare for a gamut fix.
 // This pass optionally makes bright colors smear over because they aren't being clamped low enough.
 // I'm no expert, but my assumption is that this happens when a CRT has weakened after being used for a very long time.
-// CRTs that are working properly don't have this problem. Even my 1989 RCA Colortrak doesn't have this problem at all.
+// CRTs that are working properly generally don't have this problem.
 
 layout(push_constant) uniform Push
 {
@@ -190,7 +190,7 @@ vec3 testPatternSplit(vec2 pos) {
         return vec3(-43);
     } else if(global.pn_test_pattern < 4.5) {
         return vec3(-43);
-    } else if(global.pn_test_pattern < 5.5) {
+    } else {
         return vec3(-43);
     }
 }
@@ -227,18 +227,98 @@ void main()
             rgb = rgb2;
     }
     
+    float maxRgb = 0.0;
+    if(!NES_ENABLE && !NES_RGB_ENABLE) {
+        float tint = -global.pn_knob_tint * pi / 180.0;
+        // Takes into account saturation, and tint, but neither contrast nor brightness.
+        mat3 rgbToRgbMat = yuvToRgbMatrix()
+            * mat3(1, 0, 0,
+                   0, global.pn_knob_saturation, 0,
+                   0, 0, global.pn_knob_saturation)
+            * mat3(1, 0, 0,
+                   0, cos(tint), sin(tint),
+                   0, -sin(tint), cos(tint))
+            * rgbToYuvMatrix();
+        vec3 maxRgbs = max(rgbToRgbMat[0], 0.0) + max(rgbToRgbMat[1], 0.0) + max(rgbToRgbMat[2], 0.0);
+        maxRgb = max(maxRgbs[0], max(maxRgbs[1], maxRgbs[2]));
+    } else {
+        mat3x2 axisPts = yuvAxisPointsSynced();
+        float maxAxis = max(axisPts[0][1], max(axisPts[1][1], axisPts[2][1])) * global.pn_knob_saturation;
+        
+        // These new levels originate from lidnariq's post on nesdev in 2015.
+        // https://forums.nesdev.org/viewtopic.php?p=159266#p159266
+        float levels[16] = float[] (
+            0.228f, 0.312f, 0.552f, 0.880f, // Signal low
+            0.616f, 0.840f, 1.100f, 1.100f, // Signal high
+            0.192f, 0.256f, 0.448f, 0.712f, // Signal low, attenuated
+            0.500f, 0.676f, 0.896f, 0.896f  // Signal high, attenuated
+        );
+        // From lidnariq's measurements at http://forums.nesdev.org/viewtopic.php?p=159266#p159266
+        // (Represented in IRE units)
+        // 30 = colorburst max
+        // -23 = colorburst min
+        // 110 = white
+        // 0 = black
+        // Don't need to account for the change in white and black levels.
+        float nesAmp = (30.0 - -23.0) / 2.0 / 100.0;
+        float stdAmp = 20.0 / 100.0; // Standard colorburst amplitude in NTSC.
+//        float ampCorrection = stdAmp / nesAmp;
+        float ampCorrection = 1.0;
+        
+        for(int i = 0; i < 4; i++) {
+            for(int j = 0; j < 2; j++) {
+                float low = (levels[i + 8 * j] - levels[1]) / (levels[7] - levels[1]);
+                float high = (levels[4 + i + 8 * j] - levels[1]) / (levels[7] - levels[1]);
+                
+                float amp = (high - low) / 2 * ampCorrection;
+                float luma = (high + low) / 2;
+                
+                maxRgb = max(maxRgb, luma + maxAxis * amp);
+            }
+        }
+        
+        maxRgb = max(maxRgb, 1.0);
+    }
+    
+    vec4 gammaCorrected;
+    float maxGammaCorrected;
+    
     if(global.pn_gamma_type < 0.5) {
-        FragColor = vec4(EOTF_1886a_f3(rgb, CRT_l, global.pn_knob_brightness, global.pn_knob_contrast), 1.0);
+        gammaCorrected = vec4(EOTF_1886a_f3(rgb, CRT_l, global.pn_knob_brightness, global.pn_knob_contrast), 1.0);
+        maxGammaCorrected = EOTF_1886a(maxRgb, CRT_l, global.pn_knob_brightness, global.pn_knob_contrast);
     } else if(global.pn_gamma_type < 1.5) {
-        FragColor = vec4(clamp(EOTF_1886a_default_f3(rgb, global.pn_knob_brightness, global.pn_knob_contrast), 0, 1), 1.0);
+        gammaCorrected = vec4(EOTF_1886a_default_f3(rgb, global.pn_knob_brightness, global.pn_knob_contrast), 1.0);
+        maxGammaCorrected = EOTF_1886a_default(maxRgb, global.pn_knob_brightness, global.pn_knob_contrast);
     } else if(global.pn_gamma_type < 2.5) {
         rgb = max((rgb + global.pn_knob_brightness) / (1.0 + global.pn_knob_brightness), 0);
-        rgb *= pow(global.pn_knob_contrast, 1.0 / global.pn_power_gamma);
-        FragColor = vec4(pow(min(rgb, vec3(1)), vec3(global.pn_power_gamma)), 1.0);
-    } else {
+        if(global.pn_auto_contrast < 0.5)
+            rgb *= pow(global.pn_knob_contrast, 1.0 / global.pn_power_gamma);
+        gammaCorrected = vec4(pow(rgb, vec3(global.pn_power_gamma)), 1.0);
+        maxGammaCorrected = pow(maxRgb, global.pn_power_gamma);
+    } else if(global.pn_gamma_type < 3.5) {
         float contr = 1.055 * pow(global.pn_knob_contrast, 1.0 / 2.4) - 0.055; // 2.4 instead of 2.2 is not a mistake.
         rgb = (rgb + global.pn_knob_brightness) / (1 + global.pn_knob_brightness) * contr;
-        FragColor = vec4(sRGB_to_linear(rgb, 2.4), 1.0);
+        if(global.pn_auto_contrast > 0.5)
+            rgb /= (maxRgb + global.pn_knob_brightness) / (1 + global.pn_knob_brightness) * contr;
+        gammaCorrected = vec4(sRGB_to_linear(rgb, 2.4), 1.0);
+        maxGammaCorrected = 1.0;
+    } else {
+        gammaCorrected = vec4(EOTF_1886a_default_f3(rgb, global.pn_knob_brightness, 1.0), 1.0);
+        maxGammaCorrected = EOTF_1886a_default(maxRgb, global.pn_knob_brightness, 1.0);
+        
+        float blackReal = EOTF_1886a_default(0.0, max(0.0, global.pn_knob_brightness), 1.0);
+        float blackWant = global.pn_blackfix_patchy / 100;
+        float whiteWant = global.pn_knob_contrast;
+        
+        gammaCorrected =       (gammaCorrected - blackReal) / (1.0 - blackReal);
+        maxGammaCorrected = (maxGammaCorrected - blackReal) / (1.0 - blackReal);
+        gammaCorrected =       gammaCorrected * (whiteWant - blackWant) + blackWant;
+        maxGammaCorrected = maxGammaCorrected * (whiteWant - blackWant) + blackWant;
     }
+    
+    if(global.pn_auto_contrast > 0.5)
+        gammaCorrected /= maxGammaCorrected;
+    
+    FragColor = clamp(gammaCorrected, 0, 1);
 }
 

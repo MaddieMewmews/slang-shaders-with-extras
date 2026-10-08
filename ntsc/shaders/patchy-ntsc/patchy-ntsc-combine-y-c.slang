@@ -12,7 +12,8 @@ You should have received a copy of the GNU General Public License along with thi
 
 */
 
-// This pass filters the luma signal and adds the chroma signal to get the composite signal.
+// This pass filters the luma and chroma signals and adds them together to get the composite signal.
+// For NES/FC, this pass does not alter the signal at all.
 
 layout(push_constant) uniform Push
 {
@@ -48,7 +49,7 @@ layout(set = 0, binding = 2) uniform sampler2D Source;
 void main()
 {
     vec4 orig = texture(Source, vTexCoord);
-    if(global.pn_nes_enable > 0.5 || global.pn_connection_type > 1.5) {
+    if((NES_ENABLE && global.pn_connection_type < 0.5) || global.pn_connection_type > 1.5) {
         // NES or No Artifacts
                 
         FragColor = orig;
@@ -59,16 +60,26 @@ void main()
         float chroma = 0.0;
         
         // Filter luma before combining with chroma.
-        // Some S-Video mods might still have lowpassed luma.
-        luma = lowpassPickable(global.pn_modulator_luma_filter_type,
-            global.pn_modulator_luma_filter_width, global.pn_modulator_luma_filter_level,
-            global.pn_modulator_luma_sigma, global.pn_modulator_luma_radius,
-            global.pn_modulator_luma_res).r;
+        // Some S-Video mods might still have lowpassed luma, but I'm not doing that, for convenience to this shader's user.
+        if(global.pn_connection_type < 0.5) {
+            luma = lowpassPickable(global.pn_modulator_luma_filter_type,
+                global.pn_modulator_luma_filter_width, global.pn_modulator_luma_filter_level,
+//                global.pn_modulator_luma_sigma, global.pn_modulator_luma_radius,
+                0, 0,
+    //            global.pn_modulator_luma_res,
+                0.0,
+                0, 0, 0,
+                global.pn_modulator_luma_notch_width, global.pn_modulator_luma_notch_lo, global.pn_modulator_luma_notch_hi, global.pn_modulator_luma_notch_intensity,
+                global.pn_modulator_luma_antihigh_width, global.pn_modulator_luma_antihigh_cancelfreq, global.pn_modulator_luma_antihigh_cutofffreq, global.pn_modulator_luma_antihigh_intensity).r;
+            
+            chroma = bandpassPickable(global.pn_modulator_chroma_filter_type,
+                global.pn_modulator_chroma_filter_width, global.pn_modulator_chroma_filter_level, global.pn_modulator_chroma_filter_level_diff, 0.0).g;
+        } else {
+            luma = texture(Source, vTexCoord).r;
+            chroma = texture(Source, vTexCoord).g;
+        }
         
-        chroma = bandpassPickable(global.pn_modulator_chroma_filter_type,
-            global.pn_modulator_chroma_filter_width, global.pn_modulator_chroma_filter_level, global.pn_modulator_chroma_filter_level_diff).g;
-        
-        if(global.pn_connection_type < 0.5 && global.pn_genesis_jailbar_enable > 0.5) {
+        if(global.pn_genesis_jailbar_enable > 0.5 && global.pn_test_pattern < 0.5) {
             // Compensate for cropped overscan, assuming equal crop on both sides.
             // Current position in pixels, both x and y being decimal numbers.
             vec2 pixelCoord = realPixelCoord();

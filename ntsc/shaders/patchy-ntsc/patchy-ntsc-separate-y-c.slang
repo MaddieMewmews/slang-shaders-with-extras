@@ -13,6 +13,7 @@ You should have received a copy of the GNU General Public License along with thi
 */
 
 // This pass separates luma and chroma from each other and demodulates chroma into B-Y and R-Y, using B-Y and R-Y offsets and multipliers taken from real jungle chips, taking into account the Tint knob/OSD setting.
+// For NES/FC without the video capture LUT, a correction is done on the hue rotation, with a different rotation depending on Y.
 
 layout(push_constant) uniform Push
 {
@@ -51,13 +52,14 @@ void main()
         
         mat3x2 yuvAxisPts = yuvAxisPointsSynced();
         
+        float tint = global.pn_knob_tint * pi / 180.0;
         float xr, yr, xg, yg, xb, yb;
-        xr = yuvAxisPts[0][1] * cos(yuvAxisPts[0][0]);
-        yr = yuvAxisPts[0][1] * sin(yuvAxisPts[0][0]);
-        xg = yuvAxisPts[1][1] * cos(yuvAxisPts[1][0]);
-        yg = yuvAxisPts[1][1] * sin(yuvAxisPts[1][0]);
-        xb = yuvAxisPts[2][1] * cos(yuvAxisPts[2][0]);
-        yb = yuvAxisPts[2][1] * sin(yuvAxisPts[2][0]);
+        xr = yuvAxisPts[0][1] * cos(yuvAxisPts[0][0] + tint);
+        yr = yuvAxisPts[0][1] * sin(yuvAxisPts[0][0] + tint);
+        xg = yuvAxisPts[1][1] * cos(yuvAxisPts[1][0] + tint);
+        yg = yuvAxisPts[1][1] * sin(yuvAxisPts[1][0] + tint);
+        xb = yuvAxisPts[2][1] * cos(yuvAxisPts[2][0] + tint);
+        yb = yuvAxisPts[2][1] * sin(yuvAxisPts[2][0] + tint);
         
         // YUV to Y B-Y R-Y matrix
         mat3 toYBmyRmy = mat3(1, 0, 0,
@@ -72,14 +74,26 @@ void main()
         float phase = getPhase();
         
         if(global.pn_connection_type < 0.5) { // Composite
-            // Filter the signal to isolate luma
-            luma += lowpassPickable(global.pn_demodulator_luma_filter_type,
-                global.pn_demodulator_luma_filter_width, global.pn_demodulator_luma_filter_level,
-                global.pn_demodulator_luma_radius, global.pn_demodulator_luma_sigma,
-                global.pn_demodulator_luma_res).r;
+            if(global.pn_demodulator_luma_filter_type < 7.5 || global.pn_demodulator_luma_filter_type > 8.5) {
+                // Filter the signal to isolate luma
+                luma += lowpassPickable(global.pn_demodulator_luma_filter_type,
+                    global.pn_demodulator_luma_filter_width, global.pn_demodulator_luma_filter_level,
+//                    global.pn_demodulator_luma_radius, global.pn_demodulator_luma_sigma,
+                    0, 0,
+//                    global.pn_demodulator_luma_res,
+                    0.0,
+                    0, 0, 0,
+                    global.pn_demodulator_luma_notch_width, global.pn_demodulator_luma_notch_lo, global.pn_demodulator_luma_notch_hi, global.pn_demodulator_luma_notch_intensity,
+                    global.pn_demodulator_luma_antihigh_width, global.pn_demodulator_luma_antihigh_cancelfreq, global.pn_demodulator_luma_antihigh_cutofffreq, 1.0).r;
+                
+            }
             // Filter the signal to isolate chroma
             chroma += bandpassPickable(global.pn_demodulator_chroma_filter_type,
-                global.pn_demodulator_chroma_filter_width, global.pn_demodulator_chroma_filter_level, global.pn_demodulator_chroma_filter_level_diff).r;
+                global.pn_demodulator_chroma_filter_width, global.pn_demodulator_chroma_filter_level, global.pn_demodulator_chroma_filter_level_diff, luma).r;
+                
+            if(global.pn_demodulator_luma_filter_type > 7.5 && global.pn_demodulator_luma_filter_type < 8.5) {
+                luma = texture(Source, vTexCoord).r - chroma;
+            }
         } else {
             // S-Video
             vec2 sig = texture(Source, vTexCoord).rg;
@@ -87,21 +101,34 @@ void main()
             chroma = sig.r;
         }
         
-        if(global.pn_nes_enable < 0.5) { // Composite & S-Video
-            luma *= global.pn_color_amplitude; // Correction by the color carrier amplitude
+        if(global.pn_demodulator_luma_test > 0.5 && global.pn_demodulator_luma_test < 1.5) {
+            // Test how much chroma was left in the luma signal when separating
+            chroma = luma;
+            luma = 0.5;
+        }
+        
+        if(global.pn_demodulator_luma_test > 1.5) {
+            // Test how much luma interfered into chroma when combining.
+            luma = 0.0;
+        }
+        
+        if(!NES_ENABLE) { // Composite & S-Video
+            luma *= ccpre_color_amplitude; // Correction by the color carrier amplitude
         }
         
         float tint = global.pn_knob_tint * pi / 180.0;
         
-        if(global.pn_nes_enable > 0.5 && global.pn_nes_real_capture < 0.5) {
+        if(NES_ENABLE && global.pn_nes_real_capture < 0.5) {
             // From lidnariq's measurements at http://forums.nesdev.org/viewtopic.php?p=159266#p159266
+            // (In IRE units)
             // 30 = colorburst max
             // -23 = colorburst min
             // 110 = white
             // 0 = black
-            float nesAmp = (30.0 - -23.0) / 2.0 / (110.0 - 0.0);
-            float stdAmp = 0.2 * 100.0 / 110.0; // Standard colorburst amplitude in NTSC
-            chroma *= stdAmp / nesAmp;
+            // No need to account for the change in white and black levels here.
+            float nesAmp = (30.0 - -23.0) / 2.0 / (110.0);
+            float stdAmp = 20.0 / 100.0; // Standard colorburst amplitude in NTSC
+//            chroma *= stdAmp / nesAmp;
             float saturatedLevels[4] = {((0.228 + 0.616) / 2. - 0.312) / (1.100 - 0.312), ((0.312 + 0.840) / 2. - 0.312) / (1.100 - 0.312), ((0.552 + 1.100) / 2. - 0.312) / (1.100 - 0.312), ((0.880 + 1.100) / 2. - 0.312) / (1.100 - 0.312)}; // Calculated from DAC.slang from GTU-famicom
             
             int satLevelI = -1; // Integer part. Can be 0, 1, or 2. If the level is 3 or higher, it is represented as 2 with a fractional part greater than 1.

@@ -18,16 +18,46 @@ You should have received a copy of the GNU General Public License along with thi
 // General functions //
 ///////////////////////
 
+// Color carrier settings presets: 1-phase, 2-phase, and 3-phase
+// 2-phase and 3-phase settings are sourced from Maister NTSC.
+// 1-phase is my own Genesis settings based on my original hardware.
+
+#define CC_PRESET_COND(setting, phase1, phase2, phase3) \
+    (global.pn_color_carrier_preset < 0.5 ? setting : \
+    global.pn_color_carrier_preset < 1.5 ? phase1 : \
+    global.pn_color_carrier_preset < 2.5 ? phase2 : \
+    phase3)
+#define ccpre_scanline_dur CC_PRESET_COND(global.pn_scanline_dur, 47.7, 320.0 * 8 / 15 / 3.5795454, 256.0 / 1.5 / 3.5795454)
+#define ccpre_total_scanline_dur CC_PRESET_COND(global.pn_total_scanline_dur, 63.55, 63.55, 341 / 1.5 / 3.5795454)
+#define ccpre_num_lines CC_PRESET_COND(global.pn_num_lines, 262, 262, 262)
+#define ccpre_color_amplitude CC_PRESET_COND(global.pn_color_amplitude, 1.0, 1.0, 1.0)
+#define ccpre_color_freq CC_PRESET_COND(global.pn_color_freq, 3.5795454, 3.5795454, 3.5795454)
+#define ccpre_color_init_offset CC_PRESET_COND(global.pn_color_init_offset, 0.7, 0.0, 0.0)
+#define ccpre_color_line_offset CC_PRESET_COND(global.pn_color_line_offset, 0, 0.5, 1.0/3.0)
+#define ccpre_color_screen_offset CC_PRESET_COND(global.pn_color_screen_offset, 0, 0.5, 1.0/3.0)
+#define ccpre_color_screen_offset_modulo CC_PRESET_COND(global.pn_color_screen_offset_modulo, 2, 2, 2)
+
 // NES simulation requires SIGNAL_RES to be exactly 8. Not 16. Not 4. Only 8.
 // Some code involving NES has 8 hardcoded, and some code uses SIGNAL_RES instead.
-#define SIGNAL_RES global.pn_signal_res
+// DONT_DO_SIGNAL_RES is defined in shaders that run on the in-game pixels, before the horizontal resolution has been multiplied by SIGNAL_RES.
+#ifndef DONT_DO_SIGNAL_RES
+#   define SIGNAL_RES global.pn_signal_res
+#else
+#   define SIGNAL_RES 1
+#endif
+
 #define pi 3.14159265358
 
 // The initial release of Patchy NTSC kept multiplying things by SIGNAL_RES without accounting for changes in resolution, colorburst rate, and active area duration.
 // These macros combine all those corrections into one macro, based on the initial release's Sega Genesis settings.
 // Always be careful about whether you use SIGNAL_RES or SIGNAL_RES_CORRECTION.
-#define SETTINGS_CORRECTION (getSizes().x / 320.0 * 47.7 / global.pn_scanline_dur * 3.5795454 / global.pn_color_freq)
+#define SETTINGS_CORRECTION (getSizes().x / 320.0 * ccpre_scanline_dur / 47.7 * ccpre_color_freq / 3.5795454)
 #define SIGNAL_RES_CORRECTION (SIGNAL_RES * SETTINGS_CORRECTION)
+
+//#define NES_ENABLE (global.pn_connection_type < 1.5 && global.pn_nes_rgb_enable < 0.5 && (global.pn_test_pattern < 0.5 ? global.pn_nes_enable > 0.5 : global.pn_test_pattern > 4.5))
+//#define NES_RGB_ENABLE (global.pn_nes_rgb_enable > 0.5 || (global.pn_connection_type > 1.5 && (global.pn_test_pattern < 0.5 ? global.pn_nes_enable > 0.5 : global.pn_test_pattern > 4.5)))
+#define NES_ENABLE (global.pn_connection_type < 1.5 && (global.pn_test_pattern > 4.5 || (global.pn_test_pattern < 0.5 && global.pn_nes_enable > 0.5)))
+#define NES_RGB_ENABLE (global.pn_connection_type > 1.5 && (global.pn_test_pattern > 4.5 || (global.pn_test_pattern < 0.5 && global.pn_nes_enable > 0.5)))
 
 // Get the cropped and uncropped sizes of the screen, taking into account the possibility that the resolution was multiplied by an exact integer.
 vec4 getSizes() {
@@ -81,13 +111,13 @@ int getPhaseIntNES() {
 }
 
 float getPhase(int yOff) {
-    if(global.pn_nes_enable > 0.5) {
+    if(NES_ENABLE) {
         int p = getPhaseIntNES(yOff);
         return 2 * pi * (p + 3) / 12.0;
     } else {
         vec2 pixelCoord = realPixelCoord();
         float realOffX = pixelCoord.x / getSizes().x;
-        return 2 * pi * (realOffX * global.pn_scanline_dur * global.pn_color_freq + global.pn_color_init_offset + global.pn_color_line_offset * (pixelCoord.y + yOff) + (global.pn_color_screen_offset_modulo < 1.5 ? params.FrameCount : params.FrameCount % int(global.pn_color_screen_offset_modulo + 0.5)) * global.pn_color_screen_offset);
+        return 2 * pi * (realOffX * ccpre_scanline_dur * ccpre_color_freq + ccpre_color_init_offset + ccpre_color_line_offset * (pixelCoord.y + yOff) + (ccpre_color_screen_offset_modulo < 1.5 ? params.FrameCount : params.FrameCount % int(ccpre_color_screen_offset_modulo + 0.5)) * ccpre_color_screen_offset);
     }
 }
 
@@ -96,20 +126,20 @@ float getPhase() {
 }
 
 float getFreqFactor() {
-    if(global.pn_nes_enable > 0.5) {
+    if(NES_ENABLE) {
         // https://www.nesdev.org/wiki/NTSC_video as of August 15, 2024
         // Each NES pixel is 186 nanoseconds.
         return 0.186 / 8.0 * 2 * pi;
     } else {
-        return global.pn_scanline_dur / getSizes().x / SIGNAL_RES * 2 * pi;
+        return ccpre_scanline_dur / getSizes().x / SIGNAL_RES * 2 * pi;
     }
 }
 
 float getBurstRate() {
-    if(global.pn_nes_enable > 0.5) {
+    if(NES_ENABLE) {
         return 2 * pi / 12.0;
     } else {
-        return 2 * pi / SIGNAL_RES / getSizes().x * global.pn_scanline_dur * global.pn_color_freq;
+        return 2 * pi / SIGNAL_RES / getSizes().x * ccpre_scanline_dur * ccpre_color_freq;
     }
 }
 
@@ -183,7 +213,7 @@ vec4 filterEQF(float f_lo_mhz, float f_hi_mhz,
 
 // https://www.nesdev.org/wiki/NTSC_video as of August 15, 2024
 // Each NES pixel is 186 nanoseconds.
-#define L_FREQ (global.pn_nes_enable > 0.5 ? 8 / 0.186 : SIGNAL_RES * getSizes().x / global.pn_scanline_dur)
+#define L_FREQ (NES_ENABLE ? 8 / 0.186 : SIGNAL_RES * getSizes().x / ccpre_scanline_dur)
 #define CRT_HRES (getSizes().x * SIGNAL_RES)
 #define MHz2L(MHz) (CRT_HRES * ((MHz)) / L_FREQ)
 
@@ -264,9 +294,49 @@ vec4 filterEQF(float f_lo_mhz, float f_hi_mhz,
 #undef HISTNEW
 }
 
+#define logbase(A, B) (log(B) / log(A))
+
 ///////////////////////
 // Lowpass functions //
 ///////////////////////
+
+
+vec4 lowpassLeakyIntegrator(float offset, float dist, float rate) {
+
+    rate /= 100;
+    
+    rate = 1.0 - pow(1.0 - rate, 1.0 / SIGNAL_RES_CORRECTION);
+    
+    int distInt = int(floor(dist * SIGNAL_RES_CORRECTION + 0.5) + 0.5);
+    int offsetInt = int(floor(offset * SIGNAL_RES_CORRECTION + 0.5) + 0.5);
+    
+    if(offset < -0.1) {// The 0.5 didn't make any mathematical sense, but it looked good.
+        offsetInt = -int(0.5 * logbase(1 - rate, 2) + 0.5);
+        distInt = int(logbase(1 - rate, 0.01) + 0.5);
+    }
+    
+    float wavelength = !NES_ENABLE ? getSizes().x * SIGNAL_RES / ccpre_scanline_dur / ccpre_color_freq : 12;
+    int prevOff = -int(wavelength / 4 + 0.5);
+    int nextOff = prevOff + int(wavelength / 2 + 0.5);
+    
+    vec4 lowPassed = vec4(0);
+    for(int i = -distInt; i <= 0; i++) {
+//        vec4 samp = lowpassFullPhase(1.0);
+        vec4 samp = (texture(Source, vTexCoord + vec2((i + offsetInt - wavelength / 4 * 1.5) * params.OutputSize.z, 0))
+                   + texture(Source, vTexCoord + vec2((i + offsetInt - wavelength / 4 * 0.5) * params.OutputSize.z, 0))
+                   + texture(Source, vTexCoord + vec2((i + offsetInt + wavelength / 4 * 0.5) * params.OutputSize.z, 0))
+                   + texture(Source, vTexCoord + vec2((i + offsetInt  + wavelength / 4 * 1.5) * params.OutputSize.z, 0))) / 4.0;
+//        vec4 samp = (texture(Source, vTexCoord + vec2((i + offsetInt - wavelength / 2) * params.OutputSize.z, 0))
+//                   + texture(Source, vTexCoord + vec2((i + offsetInt) * params.OutputSize.z, 0)) * 2
+//                   + texture(Source, vTexCoord + vec2((i + offsetInt  + wavelength / 2) * params.OutputSize.z, 0))) / 4.0;
+//        vec4 samp = (texture(Source, vTexCoord + vec2((i + offsetInt - wavelength / 4 * 1.5) * params.OutputSize.z, 0))
+//                   + texture(Source, vTexCoord + vec2((i + offsetInt  + wavelength / 4 * 1.5) * params.OutputSize.z, 0))) / 2.0;
+//        vec4 samp = texture(Source, vTexCoord + vec2((i + offsetInt) * params.OutputSize.z, 0));
+        lowPassed = lowPassed * (1.0 - rate) + samp * rate;
+    }
+    
+    return lowPassed;
+}
 
 // https://www.mathworks.com/help/signal/ug/fir-filter-design.html as of August 9, 2024
 // Lowpass using the "Windowing Method" as described on that website.
@@ -274,7 +344,7 @@ vec4 filterEQF(float f_lo_mhz, float f_hi_mhz,
 vec4 lowpass(float halfWidth, float level) {
     float freqFactor = getFreqFactor();
     float levelFixed = level * freqFactor;
-    int halfWidthInt = int(floor(halfWidth * SIGNAL_RES_CORRECTION + 0.5)); // Round to nearest integer.
+    int halfWidthInt = int(floor(halfWidth * SIGNAL_RES_CORRECTION + 0.5) + 0.5); // Round to nearest integer.
     
     float totalMax = 0.;
     vec4 lowPassed = vec4(0);
@@ -286,6 +356,55 @@ vec4 lowpass(float halfWidth, float level) {
     }
     
     return lowPassed / totalMax;
+}
+
+vec4 antiHighpassFilter(float halfWidth, float cancelLevel, float level, float intensity) {
+    float freqFactor = getFreqFactor();
+    float levelFixed = level * freqFactor;
+    int halfWidthInt = int(floor(halfWidth * SIGNAL_RES_CORRECTION + 0.5) + 0.5); // Round to nearest integer.
+    
+    float totalMax = 0.;
+    float burstSum = 0.;
+    vec4 lowPassed = vec4(0);
+    for(int i = -halfWidthInt; i <= halfWidthInt; i++) {
+        vec4 samp = texture(Source, vTexCoord + vec2(i * params.OutputSize.z, 0));
+        float factor = levelFixed * sinc(levelFixed * i) * blackman(i + halfWidthInt, halfWidthInt * 2);
+        totalMax += factor;
+        lowPassed += factor * samp;
+        burstSum += factor * cos(cancelLevel * freqFactor * i);
+    }
+    
+    vec4 orig = texture(Source, vTexCoord);
+    
+    return mix(orig, (lowPassed / burstSum - orig) / (totalMax / burstSum - 1), intensity);
+}
+
+vec4 bandstopFilter(float halfWidth, float levelLo, float levelHi, float intensity) {
+    float freqFactor = getFreqFactor();
+    float levelFixedLo = (levelLo) * freqFactor;
+    float levelFixedHi = (levelHi) * freqFactor;
+    int halfWidthInt = int(floor(halfWidth * SIGNAL_RES_CORRECTION + 0.5) + 0.5); // Round to nearest integer.
+    
+    float burstRate = getBurstRate();
+    
+    vec4 bandPassed = vec4(0);
+    float maxSum = 0.0;
+    float maxTotal = 0.0;
+    for(int i = -halfWidthInt; i <= halfWidthInt; i++) {
+        vec4 samp = texture(Source, vTexCoord + vec2(i * params.OutputSize.z, 0));
+        float window = blackman(i + halfWidthInt, halfWidthInt * 2);
+        float factorLo = levelFixedLo * sinc(levelFixedLo * i);
+        float factorHi = levelFixedHi * sinc(levelFixedHi * i);
+        float factor = factorHi - factorLo;
+        bandPassed += window * factor * samp;
+        maxSum += window * factor * cos(burstRate * i);
+        maxTotal += window * factor;
+    }
+    
+    vec4 orig = texture(Source, vTexCoord);
+    
+//    return orig - bandPassed / maxSum;
+    return mix(orig, (bandPassed / maxSum - orig) / (maxTotal / maxSum - 1), intensity);
 }
 
 vec4 lowpassGaussian(float sigma, float radius) {
@@ -336,8 +455,8 @@ vec4 lowpassGTU(float signalRes) {
     // Taken from GTU-Famicom by aliaspider
     
     float   offset  = fract((vTexCoord.x * params.OutputSize.x) - 0.5);
-    float range = ceil(0.5 + (global.pn_nes_enable < 0.5 ? params.OutputSize.x * SETTINGS_CORRECTION : getSizes().x * SIGNAL_RES) / signalRes);
-    float   Y = signalRes * (global.pn_nes_enable < 0.5 ? params.OutputSize.z / SETTINGS_CORRECTION : 1.0 / getSizes().x / SIGNAL_RES); // Remember to compensate for cropped overscan. The user might or might not be cropping it.
+    float range = ceil(0.5 + (!NES_ENABLE ? params.OutputSize.x * SETTINGS_CORRECTION : getSizes().x * SIGNAL_RES) / signalRes);
+    float   Y = signalRes * (!NES_ENABLE ? params.OutputSize.z / SETTINGS_CORRECTION : 1.0 / getSizes().x / SIGNAL_RES); // Remember to compensate for cropped overscan. The user might or might not be cropping it.
     float X;
     vec4 c;
     vec4 combined = vec4(0);
@@ -357,10 +476,10 @@ vec4 lowpassGTU(float signalRes) {
 
 vec4 twoPointCombLuma() {
     float halfPhase;
-    if(global.pn_nes_enable > 0.5) {
+    if(NES_ENABLE) {
         halfPhase = 6 * params.OutputSize.z;
     } else {
-        halfPhase = ceil(getSizes().x * SIGNAL_RES / global.pn_scanline_dur / global.pn_color_freq / 2.0) * params.OutputSize.z;
+        halfPhase = ceil(getSizes().x * SIGNAL_RES / ccpre_scanline_dur / ccpre_color_freq / 2.0) * params.OutputSize.z;
     }
 //    vec2 coord = vTexCoord + vec2(floor(halfPhase / params.OutputSize.z / 2) * params.OutputSize.z, 0); // Make sure we step by a multiple of an input pixel. Stepping by a fraction doesn't filter as good.
 //    return (texture(Source, coord) + texture(Source, coord - vec2(halfPhase, 0))) / 2;
@@ -369,7 +488,7 @@ vec4 twoPointCombLuma() {
 }
 
 vec4 lowpassFullPhase(float width) {
-    float wavelength = global.pn_nes_enable < 0.5 ? getSizes().x * SIGNAL_RES / global.pn_scanline_dur / global.pn_color_freq : 12;
+    float wavelength = !NES_ENABLE ? getSizes().x * SIGNAL_RES / ccpre_scanline_dur / ccpre_color_freq : 12;
     wavelength *= width;
     
     int start = int(ceil(-wavelength / 2.0) + 0.5);
@@ -389,7 +508,7 @@ vec4 lowpassFullPhase(float width) {
 }
 
 vec4 twoLineComb(bool chroma) {
-    float wavelength = global.pn_nes_enable < 0.5 ? getSizes().x * SIGNAL_RES / global.pn_scanline_dur / global.pn_color_freq : 12;
+    float wavelength = !NES_ENABLE ? getSizes().x * SIGNAL_RES / ccpre_scanline_dur / ccpre_color_freq : 12;
     
     float thisOffset = mod(getPhase() / 2 / pi, 1.0);
     float prevOffset = mod(getPhase(-1) / 2 / pi + 0.5, 1.0);
@@ -403,7 +522,7 @@ vec4 twoLineComb(bool chroma) {
 }
 
 vec4 threeLineComb(bool chroma) {
-    float wavelength = global.pn_nes_enable < 0.5 ? getSizes().x * SIGNAL_RES / global.pn_scanline_dur / global.pn_color_freq : 12;
+    float wavelength = !NES_ENABLE ? getSizes().x * SIGNAL_RES / ccpre_scanline_dur / ccpre_color_freq : 12;
     
     float thisOffset = mod(getPhase() / 2 / pi, 1.0);
     float prevOffset = mod(getPhase(-1) / 2 / pi + 0.5, 1.0);
@@ -419,23 +538,105 @@ vec4 threeLineComb(bool chroma) {
     return (thisLuma + (prevLuma + nextLuma) / 2.0 * (chroma ? -1 : 1)) / 2;
 }
 
+vec4 lowpassPreset(float lpPreset) {
+#define PRESET_COUNT 8
+    // Format: cutoff frequency, half-width
+    // Opposite order from the function parameters.
+    // Opposite order from Genesis lowpass presets.
+    vec2 presets[PRESET_COUNT] = {
+        vec2(2.15, 6),
+        vec2(2.3, 6.5),
+        vec2(2.45, 7),
+        vec2(2.6, 8),
+        vec2(2.75, 9.5),
+        vec2(2.9, 11.5),
+        vec2(3.05, 14.5),
+        vec2(3.2, 20.5)
+    };
+    
+    // Old presets that let through just a little bit of the chroma signal. It's hard to notice on some CRT shaders.
+    // These old ones have a benefit of slightly reduced ripples, but I don't think it's worth it for the CRT shaders that still have it visible.
+//    vec2 presets[PRESET_COUNT] = {
+//        vec2(2.15, 5),
+//        vec2(2.3, 5.5),
+//        vec2(2.45, 6.25),
+//        vec2(2.6, 7.25),
+//        vec2(2.75, 8.5),
+//        vec2(2.9, 10.5),
+//        vec2(3.05, 13.5),
+//        vec2(3.2, 19)
+//    };
+    
+    vec2 closest = presets[0];
+    int i = 1;
+    do {
+        vec2 now = presets[i];
+        if(abs(lpPreset - now.x) < abs(lpPreset - closest.x))
+            closest = now;
+        i++;
+    } while(i < PRESET_COUNT);
+    
+    return lowpass(closest.y, closest.x); // Opposite order (y, x) is intentional.
+    
+#undef PRESET_COUNT
+}
+
+vec4 lowpassGenesisPreset(float lpPreset) {
+
+#define PRESET_COUNT 14
+    // Format: half-width, cutoff frequency
+    // Same order as the function parameters.
+    // Opposite order from demodulator lowpass presets
+    vec2 presets[PRESET_COUNT] = {
+        vec2(1.75, 1.7),
+        vec2(2.0, 2.175),
+        vec2(2.25, 2.425),
+        vec2(2.5, 2.55),
+        vec2(2.75, 2.65),
+        vec2(3.0, 2.7),
+        vec2(3.5, 2.8),
+        vec2(4.0, 2.875),
+        vec2(4.5, 2.925),
+        vec2(5, 2.975),
+        vec2(5.5, 3),
+        vec2(6, 3.025),
+        vec2(6.5, 3.05),
+        vec2(7, 3.075)
+    };
+    
+    vec2 preset;
+    if(lpPreset < 0.0)
+        preset = presets[0];
+    else if(lpPreset > PRESET_COUNT - 1.0)
+        preset = presets[PRESET_COUNT - 1];
+    else
+        preset = mix(presets[int(floor(lpPreset) + 0.5)], presets[int(ceil(lpPreset) + 0.5)], lpPreset - floor(lpPreset));
+        
+    return lowpass(preset.x, preset.y); // Same order (x, y) is intentional.
+#undef PRESET_COUNT
+}
+
 vec4 lowpassPickable(float type,
                      float halfWidth, float level, // artifact-colors sinc window
                      float gaussSigma, float gaussRadius, // guest(r) gaussian blur
-                     float signalRes) // aliaspider gtu)
+                     float signalRes, // aliaspider gtu)
+                     float intOff, float intDist, float intRate,
+                     float halfWidthBandstop, float levelLo, float levelHi, float intensity,
+                     float halfWidthAntiHi, float levelCancel, float levelCut, float intensityAntiHi)
 {
-    if(type < -0.5) {
+    if(type < -1.5) {
+        return lowpassGenesisPreset(global.pn_modulator_luma_filter_preset);
+    } else if(type < -0.5) {
         return texture(Source, vTexCoord); // No low pass
     } else if(type < 0.5) {
         return lowpass(halfWidth, level); // sinc window
     } else if(type < 1.5) {
-        return lowpassGaussian(gaussSigma, gaussRadius);
+        return bandstopFilter(halfWidthBandstop, levelLo, levelHi, intensity);
     } else if (type < 2.5) {
-        return lowpassGTU(signalRes);
-        
+        return antiHighpassFilter(halfWidthAntiHi, levelCancel, levelCut, intensityAntiHi);
         // 3 onward are for decoding only
     } else if (type < 3.5) {
-        return lowpassFullPhase(1.0);
+        return lowpassFullPhase(2.0);
     } else if (type < 4.5) {
         // This filter is only for the demodulator, so it's at the end.
         // The lowpass filter selection for the modulator only goes up to 3 to prevent
@@ -443,8 +644,10 @@ vec4 lowpassPickable(float type,
         return twoPointCombLuma();
     } else if(type < 5.5) {
         return twoLineComb(false);
-    } else {
+    } else if(type < 6.5) {
         return threeLineComb(false);
+    } else {
+        return lowpassPreset(global.pn_demodulator_luma_sinc_preset);
     }
 }
 
@@ -458,7 +661,7 @@ vec4 bandpass(float halfWidth, float levelLo, float levelHi) {
     float freqFactor = getFreqFactor();
     float levelFixedLo = (levelLo) * freqFactor;
     float levelFixedHi = (levelHi) * freqFactor;
-    int halfWidthInt = int(floor(halfWidth * SIGNAL_RES_CORRECTION + 0.5)); // Round to nearest integer.
+    int halfWidthInt = int(floor(halfWidth * SIGNAL_RES_CORRECTION + 0.5) + 0.5); // Round to nearest integer.
     
     float burstRate = getBurstRate();
     
@@ -479,8 +682,8 @@ vec4 bandpass(float halfWidth, float levelLo, float levelHi) {
 
 vec4 twoPointCombChroma() {
     float halfPhase;
-    if(global.pn_nes_enable < 0.5) {
-        halfPhase = params.OutputSize.z * SIGNAL_RES / 2 / (global.pn_scanline_dur * global.pn_color_freq / getSizes().x);
+    if(!NES_ENABLE) {
+        halfPhase = params.OutputSize.z * SIGNAL_RES / 2 / (ccpre_scanline_dur * ccpre_color_freq / getSizes().x);
     } else {
         halfPhase = params.OutputSize.z * 6;
     }
@@ -488,7 +691,7 @@ vec4 twoPointCombChroma() {
 }
 
 vec4 bandpassPickable(float type,
-                      float halfWidth, float level, float levelDiff)
+                      float halfWidth, float level, float levelDiff, float luma)
 {
     if(type < -0.5) {
         return texture(Source, vTexCoord);
@@ -500,8 +703,10 @@ vec4 bandpassPickable(float type,
         return twoPointCombChroma();
     } else if(type < 2.5) {
         return twoLineComb(true);
-    } else {
+    } else if(type < 3.5) {
         return threeLineComb(true);
+    } else {
+        return texture(Source, vTexCoord) - luma;
     }
 }
 
@@ -550,11 +755,26 @@ mat3x2 yuvAxisPoints() {
       b_off = 123 / 180.0 * 3.14159265359;
       b_max = 1;
    } else if(global.pn_demodulator_std < 4.5) {
-      // Panasonic AN5367FB
-      r_off = (123 - 104) / 180.0 * 3.14159265359;
-      r_max = 0.96;
+//      // Panasonic AN5367FB
+//      r_off = (123 - 104) / 180.0 * 3.14159265359;
+//      r_max = 0.96;
+//      g_off = (123 - 235) / 180.0 * 3.14159265359;
+//      g_max = 0.36;
+//      b_off = 123 / 180.0 * 3.14159265359;
+//      b_max = 1;
+      // Toshiba TA7698AP -- Replaced the AN5367FB due to similarity.
+      // Unlike the AN5367FB which appeared in a ~1997 CRT that I forgot the name of,
+      // the TA7698AP is from a ~1988 Toshiba CRT that I saw on CRT Database.
+      // Although the numbers 105 and 1.0 look low on precision, the other numbers
+      // in the paper are much more precise, so these are probably precise too.
+      // It's interesting that the TA8867AN and CXA1465AS from roughly 1994-95 are
+      // sandwiched between the TA7698AP from roughly 1989 and the AN5367FB from
+      // roughly 1997, considering the 1997 one basically undid the changes
+      // that happened in the 1994 ones.
+      r_off = (123 - 105) / 180.0 * 3.14159265359;
+      r_max = 1.0;
       g_off = (123 - 235) / 180.0 * 3.14159265359;
-      g_max = 0.36;
+      g_max = 0.38;
       b_off = 123 / 180.0 * 3.14159265359;
       b_max = 1;
    } else if(global.pn_demodulator_std < 5.5) {
@@ -589,7 +809,7 @@ mat3x2 yuvAxisPoints() {
       g_max = 0.31;
       b_off = 123 / 180.0 * 3.14159265359;
       b_max = 1;
-   } else if(global.pn_demodulator_std < 9.5) {
+   } else {
       // Custom from the user, in the same format as in a data sheet.
       r_off = (123 - global.pn_demodulator_r_off) / 180.0 * pi;
       g_off = (123 - global.pn_demodulator_g_off) / 180.0 * pi;
@@ -847,51 +1067,71 @@ mat3x2 yuvSyncAvg(mat3x2 yuvAxisPts) {
 }
 
 mat3x2 yuvSyncEyeballed(mat3x2 yuvAxisPts) {
-    float hue, sat;
+    // Standard matrices that are already sync'd
+    if(global.pn_demodulator_std < 1.5) {
+        return yuvAxisPts;
+    }
     
     // DISCLAIMER: I do not own CRTs with these chips at the moment.
-    // I have set these settings on this same program by eye.
-    // Meant to be used with brightness 0.1 and 
+    // These settings represent my own personal opinion about what settings look
+    // best for decoding a 90s console's color.
     
+    float hue, sat;
     if(global.pn_demodulator_std < 1.5) {
-        // Standard matrices that are already sync'd
+        // Standard YUV matrices are already perfect.
         hue = 0.0;
         sat = 1.0;
     } else if(global.pn_demodulator_std < 2.5) {
         // CXA2025AS JP
+        // The best calibration turned out to be no change at all.
         hue = 0.0;
-        sat = 0.8;
+        sat = 1.0;
     } else if(global.pn_demodulator_std < 3.5) {
         // CXA1464AS
-        hue = 0.0;
-        sat = 0.8;
+        // The best calibration turned out to be no change at all.
+        hue = 0;
+        sat = 1.0;
     } else if(global.pn_demodulator_std < 4.5) {
-        // AN5367FB
+        // TA7698AP
         // Sync'd against the averaged matrix
+        // Same settings as TA8867BN due to similarity of the chips' numbers.
         yuvAxisPts = yuvSyncAvg(yuvAxisPts);
-        hue = -3.0;
-        sat = 0.9;  
+        hue = -5;
+        sat = 1.05;  
     } else if(global.pn_demodulator_std < 5.5) {
         // TA8867BN
         // Sync'd against the averaged matrix
+        // This one is set up to be faithful-ish to my 1989 RCA ColorTrak Remote.
+        // The ground in Battletoads looks green, while the ground in Duck Hunt looks more brown.
+        // Saturation set based on Mortal Kombat.
+        // Intended brightness setting is 0.15.
         yuvAxisPts = yuvSyncAvg(yuvAxisPts);
-        hue = -5.0;
-        sat = 0.9;
+        hue = -5;
+        sat = 1.05;
     } else if(global.pn_demodulator_std < 6.5) {
         // TA8867AN
-        // Sync'd against the averaged matrix
+        // Sync'd against the averaged matrix.
+        // For this one, I was looking at Mortal Kombat, trying to make the skin tones look similar to the TA8867BN.
         yuvAxisPts = yuvSyncAvg(yuvAxisPts);
-        hue = -5.0;
-        sat = 0.9;
+        hue = 0;
+        sat = 1.05;
     } else if(global.pn_demodulator_std < 7.5) {
         // CXA2025AS US
-        hue = -12;
-        sat = 0.8;
+        // Sync'd against the averaged matrix.
+        // Looked at Mortal Kombat for this one too.
+        // These Sony CXA US ones look so awful.
+        // They have another feature called Dynamic Color. For now, I'm assuming that feature makes the output actually good.
+        yuvAxisPts = yuvSyncAvg(yuvAxisPts);
+        hue = -2.5;
+        sat = 1.0;
     } else if(global.pn_demodulator_std < 8.5) {
         // CXA1465AS US
-        hue = -12;
-        sat = 0.8;
-    } else if(global.pn_demodulator_std < 9.5) {
+        // Sync'd against the averaged matrix
+        // Used same settings as CXA2025AS US because the chips' numbers are so close.
+        yuvAxisPts = yuvSyncAvg(yuvAxisPts);
+        hue = -2.5;
+        sat = 1.0;
+    } else {
         // Custom. Let the user figure it out.
         hue = 0.0;
         sat = 1.0;
@@ -921,6 +1161,102 @@ mat3x2 yuvAxisPointsSynced() {
     } else {
         return yuvSyncEyeballed(yuvAxisPts);
     }
+}
+
+mat2 bmyRmyToYuvMatrix() {
+    mat3x2 yuvAxisPts = yuvAxisPointsSynced();
+    
+    float xr, yr, xg, yg, xb, yb;
+    xr = yuvAxisPts[0][1] * cos(yuvAxisPts[0][0]);
+    yr = yuvAxisPts[0][1] * sin(yuvAxisPts[0][0]);
+    xg = yuvAxisPts[1][1] * cos(yuvAxisPts[1][0]);
+    yg = yuvAxisPts[1][1] * sin(yuvAxisPts[1][0]);
+    xb = yuvAxisPts[2][1] * cos(yuvAxisPts[2][0]);
+    yb = yuvAxisPts[2][1] * sin(yuvAxisPts[2][0]);
+    
+    // UV to B-Y R-Y matrix
+    mat2 toBmyRmy = mat2(xb, xr,
+                          yb, yr);
+    
+    return inverse(toBmyRmy);
+}
+
+mat3 rgbToYuvMatrix() {
+    
+        
+    mat3 yuvMat;
+//    if(global.pn_modulator_std < 0.5) {
+        // Rec. 601 YUV matrix
+        // This is used in the Genesis/MegaDrive and SNES/SFC
+        yuvMat = mat3x3(
+                    0.299, -0.14713, 0.615,
+                    0.587, -0.28886, -0.51499,
+                    0.114, 0.436, -0.10001
+                 );
+//    } else if(global.pn_modulator_std < 1.5) {
+        // Rec. 709 YUV matrix
+        // Removed because this is the HD spec.
+        // Consoles never used it for encoding their composite and s-video signals.
+        // It is often used erroneously for decoding composite signals' colors.
+        // For instance, using my Dazzle DVC100 with OBS gave me a Rec. 709 based decoding.
+//        yuvMat = mat3(0.2126, -0.09991, 0.615,
+//                      0.7152, -0.33609, -0.55861,
+//                      0.0722, 0.436, -0.05639);
+//    } else {
+        // This matrix was removed because it's too similar to Rec. 601, and it is less precise due to
+        // the data sheets only having two decimal places of precision.
+        
+//        float redShift, redAmp, redY,
+//        greenShift, greenAmp, greenY,
+//        blueShift, blueAmp, blueY,
+//        whiteY;
+//
+//      // NTSC color encoding
+//      // Genesis/MegaDrive's Sony CXA1145
+//      // Taken from Sony's official documentation
+//      // Also, the CXA1645, MB3514, and KA2195D all have these same values too.
+//      // Same values are also found in the hard-to-find datasheets for SNES video encoders.
+//      // It's safe to assume almost any 90s console uses these values for composite.
+//      // The factor 0.2 comes from the standard colurburst amplitude being 0.2.
+//      // This can be verified against the data sheets, as their colorburst amplitude is 0.29 / 0.71 / 2.
+//      redShift = (104.0) / 180.0 * pi;
+//      redAmp = 3.16 * 0.2;
+//      redY = 0.21;
+//      greenShift = (-119.0) / 180.0 * pi; // -119 deg = 241 deg
+//      greenAmp = 2.95 * 0.2;
+//      greenY = 0.42;
+//      blueShift = (-13.0) / 180.0 * pi; // -13 deg = 347 deg
+//      blueAmp = 2.24 * 0.2;
+//      blueY = 0.08;
+//      whiteY = 0.71;
+//
+//      yuvMat = mat3(
+//         redY/whiteY,   redAmp*cos(redShift),      redAmp*sin(redShift),
+//         greenY/whiteY, greenAmp*cos(greenShift),  greenAmp*sin(greenShift),
+//         blueY/whiteY,  blueAmp*cos(blueShift),    blueAmp*sin(blueShift)
+//      );
+//    }
+    
+    return yuvMat;
+}
+
+mat3 yuvToRgbMatrix() {
+    mat3x2 yuvAxisPts = yuvAxisPointsSynced();
+    
+    float xr, yr, xg, yg, xb, yb;
+    xr = yuvAxisPts[0][1] * cos(yuvAxisPts[0][0]);
+    yr = yuvAxisPts[0][1] * sin(yuvAxisPts[0][0]);
+    xg = yuvAxisPts[1][1] * cos(yuvAxisPts[1][0]);
+    yg = yuvAxisPts[1][1] * sin(yuvAxisPts[1][0]);
+    xb = yuvAxisPts[2][1] * cos(yuvAxisPts[2][0]);
+    yb = yuvAxisPts[2][1] * sin(yuvAxisPts[2][0]);
+    
+    // YUV to RGB matrix
+    mat3 toRgb = mat3(1,  1,  1,
+                      xr, xg, xb,
+                      yr, yg, yb);
+    
+    return toRgb;
 }
 
 mat3 YBmyRmyToRGBMatrix() {
@@ -1252,8 +1588,13 @@ vec3 nesRealCaptureLookup(vec3 yBmyRmy, float saturation) {
 vec2 uvFilterPickable(float type) {
     if(type < -0.5) {
         return texture(Source, vTexCoord).gb;
-    } else {
+    } else if(type < 0.5) {
         return lowpassFullPhase(global.pn_demodulator_uv_filter_width).gb;
+    } else if(type < 1.5) {
+        return lowpass(global.pn_demodulator_uv_sinc_width, global.pn_demodulator_uv_sinc_level).gb;
+    } else {
+        return lowpassLeakyIntegrator(global.pn_demodulator_uv_int_off, global.pn_demodulator_uv_int_dist, global.pn_demodulator_uv_int_rate).gb;
+        return vec2(0);
     }
 }
 

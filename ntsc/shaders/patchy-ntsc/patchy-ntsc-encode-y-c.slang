@@ -12,7 +12,8 @@ You should have received a copy of the GNU General Public License along with thi
 
 */
 
-// This pass generates the raw, unfiltered luma and chroma signals separately. An optional fix for Genesis colors is included.
+// This pass includes optional test patterns, performs corrections on the console's internal colors, and generates the raw, unfiltered luma and chroma signals separately.
+// For NES/FC, this pass generates the complete composite signal.
 
 layout(push_constant) uniform Push
 {
@@ -44,6 +45,13 @@ layout(set = 0, binding = 2) uniform sampler2D Source;
 
 // Includes lowpass and bandpass functions and some shared code
 #include "patchy-ntsc-inc-filters.inc"
+
+vec3 fixSmsColor(vec3 src) {
+    // I don't know if anyone has correct numbers for this anywhere on the Internet.
+    // I have taken this conversion from Dogway's Grading Shader, but I haven't seen a reliable source for it.
+    
+    return vec3(src.rg, pow(src.b, 1.0/1.16)); // Don't know why they put 1.0/1.16 when they could've put 0.862.
+}
 
 vec3 fixGenColor(vec3 src) {
     
@@ -111,6 +119,84 @@ bool InColorp (int p, int color)
 #define TO_INT2(X) int(floor(((X) * 3.0) + 0.5))
 #define TO_INT3(X) int(floor(((X) * 7.0) + 0.5))
 #define TO_INT4(X) int(floor(((X) * 15.0) + 0.5))
+
+float nesSignalP(int p, vec3 colorIn) {
+    // This code is taken from both the nesdev wiki and from GTU-famicom, the latter created by aliaspider.
+    
+    int color    = TO_INT4(colorIn.x);
+    int level    = TO_INT2(colorIn.y);
+    int emphasis = TO_INT3(colorIn.z);
+
+    if(color > 13)  
+        level = 1;
+
+    float black = 0.312;
+    float white = 1.100;
+    
+    // These new levels originate from lidnariq's post on nesdev in 2015.
+    // https://forums.nesdev.org/viewtopic.php?p=159266#p159266
+    float levels[16] = float[] (
+        0.228f, 0.312f, 0.552f, 0.880f, // Signal low
+        0.616f, 0.840f, 1.100f, 1.100f, // Signal high
+        0.192f, 0.256f, 0.448f, 0.712f, // Signal low, attenuated
+        0.500f, 0.676f, 0.896f, 0.896f  // Signal high, attenuated
+    );
+    
+    int amtAtten = 0;
+
+    if(((bool(emphasis & 1) && InColorp(p, 0)) ||
+        (bool(emphasis & 2) && InColorp(p, 4)) ||
+        (bool(emphasis & 4) && InColorp(p, 8))) && color < 14) 
+    {
+        amtAtten = 8;
+    }
+
+    float low  = levels[0 + level + amtAtten];
+    float high = levels[4 + level + amtAtten];
+
+    if(color == 0)
+        low = high;
+    else if(color > 12)
+        high = low;
+
+    float sig = InColorp(p, color) ? high : low;
+
+    sig = (sig - black) / (white - black);
+    
+    return sig;
+}
+
+vec3 nesYuv(vec3 colorIn) {
+    vec3 yuvCol = vec3(0);
+    float sinRate = 0;
+    for(int i = 0; i < 12; i++) {
+        float sig = nesSignalP(i, colorIn.rgb);
+        yuvCol[0] += sig / 12.0;
+        yuvCol[1] += sig * sin((i + 3) / 12.0 * pi * 2.0) / 12.0 * 2.0;
+        yuvCol[2] += sig * cos((i + 3) / 12.0 * pi * 2.0) / 12.0 * 2.0;
+        sinRate += abs(sin(i / 12.0 * pi * 2) / 12.0 * 2.0);
+    }
+    
+    // Skew amounts taken from Drag's NES palette generator.
+    // I remember seeing these on the nesdev forums somewhere too.
+    // The change is done here instead of in the video signal for better precision.
+    float skew;
+    if(global.pn_nes_hue_skew < 0.5) {
+        // 2C02G
+        skew = -5.0 / 180.0 * pi; // -5 degrees
+    } else {
+        // 2C02E
+        skew = -2.5 / 180.0 * pi; // -2.5 degrees
+    }
+    
+    float tint = (3 - TO_INT2(colorIn[1])) * skew;
+    yuvCol.gb *= mat2(
+        cos(tint), sin(tint),
+        -sin(tint), cos(tint)
+    );
+    
+    return yuvCol;
+}
 
 vec3 smpteBars(vec2 pos) {
    float wholeRamp = pos.x * 8;
@@ -214,18 +300,26 @@ vec3 testPattern(vec2 pos) {
         return hsvSpectrum(pos, false);
     } else if(global.pn_test_pattern < 4.5) {
         return hsvSpectrum(pos, true);
-    } else if(global.pn_test_pattern < 5.5) {
+    } else {
         return nesFullPalette(pos);
     }
 }
 
 void main()
 {
-    vec4 colorIn;
+    vec3 colorIn;
     
     if(global.pn_test_pattern > 0.5) {
-        colorIn.rgb = testPattern(vTexCoord);
-    } else if(global.pn_nes_enable < 0.5 && global.pn_rgb_blur_enable > 0.5) {
+        colorIn = testPattern(vTexCoord);
+    } else if(NES_ENABLE || NES_RGB_ENABLE) {
+        // Don't mess with NES colors.
+        colorIn = texture(Source, vTexCoord).rgb;
+    } else if(global.pn_genesis_palette > 1.5) {
+        // SNES RGB blur and Genesis Plus GX color fixes are deliberately incompatible to prevent conflicts.
+        colorIn = fixSmsColor(texture(Source, vTexCoord).rgb);
+    } else if(global.pn_genesis_palette > 0.5) {
+        colorIn = fixGenColor(texture(Source, vTexCoord).rgb);
+    } else if(global.pn_rgb_blur_enable > 0.5) {
         int xscale = int(getSizes().x / global.pn_width_uncropped + 0.5);
         vec3 sum = vec3(0);
         int size = int(xscale * SIGNAL_RES * global.pn_rgb_blur_amount + 0.5);
@@ -234,131 +328,44 @@ void main()
         for(int i = start; i < end; i++) {
             sum += texture(Source, vTexCoord - vec2(i * params.OutputSize.z, 0)).rgb;
         }
-        colorIn.rgb = sum / size;
+        colorIn = sum / size;
     } else {
-        colorIn = texture(Source, vTexCoord);
+        colorIn = texture(Source, vTexCoord).rgb;
     }
     
     // Compensate for cropped overscan, assuming equal crop on both sides. We don't know whether the user is cropping overscan or not.
     // Current position in pixels. X is a decimal number. Y is floored to an integer.
     vec2 pixelCoord = realPixelCoord();
     
-    if(global.pn_nes_enable > 0.5) {
-        
-        // This code is taken from both the nesdev wiki and from GTU-famicom, the latter created by aliaspider.
-        
-        int p = getPhaseIntNES();
-        
-        int color    = TO_INT4(colorIn.x);
-        int level    = TO_INT2(colorIn.y);
-        int emphasis = TO_INT3(colorIn.z);
-   
-        if(color > 13)  
-            level = 1;
-
-        float black = 0.312;
-        float white = 1.100;
-        
-        // These new levels originate from lidnariq's post on nesdev in 2015.
-        // https://forums.nesdev.org/viewtopic.php?p=159266#p159266
-        float levels[16] = float[] (
-            0.228f, 0.312f, 0.552f, 0.880f, // Signal low
-            0.616f, 0.840f, 1.100f, 1.100f, // Signal high
-            0.192f, 0.256f, 0.448f, 0.712f, // Signal low, attenuated
-            0.500f, 0.676f, 0.896f, 0.896f  // Signal high, attenuated
-        );
-        
-        int amtAtten = 0;
-
-        if(((bool(emphasis & 1) && InColorp(p, 0)) ||
-            (bool(emphasis & 2) && InColorp(p, 4)) ||
-            (bool(emphasis & 4) && InColorp(p, 8))) && color < 14) 
-        {
-            amtAtten = 8;
+    if(NES_ENABLE) {
+        if(global.pn_connection_type < 0.5) {
+            FragColor = vec4(nesSignalP(getPhaseIntNES(), colorIn), 0, 0, 1);
+        } else {
+            float luma = nesYuv(colorIn)[0];
+            float chroma = nesSignalP(getPhaseIntNES(), colorIn) - luma;
+            FragColor = vec4(luma, chroma, 0, 1);
         }
-
-        float low  = levels[0 + level + amtAtten];
-        float high = levels[4 + level + amtAtten];
-
-        if(color == 0)
-            low = high;
-        else if(color > 12)
-            high = low;
-
-        float sig = InColorp(p, color) ? high : low;
-
-        sig = (sig - black) / (white - black);
-        
-        FragColor = vec4(sig, 0, 0, 1);
-        
     } else {
-        
-        if(global.pn_genesis_palette > 0.5 && global.pn_test_pattern < 0.5) {
-            colorIn.rgb = fixGenColor(colorIn.rgb);
-        }
         
         float phase = getPhase();
         
-        mat3 yuvMat;
-        if(global.pn_modulator_std < 0.5) {
-            // Rec. 601 YUV matrix
-            // This is used in the Genesis/MegaDrive and SNES/SFC
-            yuvMat = mat3x3(
-                        0.299, -0.14713, 0.615,
-                        0.587, -0.28886, -0.51499,
-                        0.114, 0.436, -0.10001
-                     );
-        } else if(global.pn_modulator_std < 1.5) {
-            // Rec. 709 YUV matrix
-            // Don't know any specific consoles using this, but I assume this *eventually* became common.
-            yuvMat = mat3(0.2126, -0.09991, 0.615,
-                          0.7152, -0.33609, -0.55861,
-                          0.0722, 0.436, -0.05639);
-        } else {
-            // This matrix was removed because it's too similar to Rec. 601, and it is less precise due to
-            // the data sheets only having two decimal places of precision.
-            
-//            float redShift, redAmp, redY,
-//            greenShift, greenAmp, greenY,
-//            blueShift, blueAmp, blueY,
-//            whiteY;
-//   
-//          // NTSC color encoding
-//          // Genesis/MegaDrive's Sony CXA1145
-//          // Taken from Sony's official documentation
-//          // Also, the CXA1645, MB3514, and KA2195D all have these same values too.
-//          // Same values are also found in the hard-to-find datasheets for SNES video encoders.
-//          // It's safe to assume almost any 90s console uses these values for composite.
-//          // The factor 0.2 comes from the standard colurburst amplitude being 0.2.
-//          // This can be verified against the data sheets, as their colorburst amplitude is 0.29 / 0.71 / 2.
-//          redShift = (104.0) / 180.0 * pi;
-//          redAmp = 3.16 * 0.2;
-//          redY = 0.21;
-//          greenShift = (-119.0) / 180.0 * pi; // -119 deg = 241 deg
-//          greenAmp = 2.95 * 0.2;
-//          greenY = 0.42;
-//          blueShift = (-13.0) / 180.0 * pi; // -13 deg = 347 deg
-//          blueAmp = 2.24 * 0.2;
-//          blueY = 0.08;
-//          whiteY = 0.71;
-//
-//          yuvMat = mat3(
-//             redY/whiteY,   redAmp*cos(redShift),      redAmp*sin(redShift),
-//             greenY/whiteY, greenAmp*cos(greenShift),  greenAmp*sin(greenShift),
-//             blueY/whiteY,  blueAmp*cos(blueShift),    blueAmp*sin(blueShift)
-//          );
-        }
+        mat3 yuvMat = rgbToYuvMatrix();
         
-        vec3 yuvCol = yuvMat * colorIn.rgb;
+        vec3 yuvCol;
+        if(!NES_RGB_ENABLE) {
+            yuvCol = yuvMat * colorIn;
+        } else {
+            yuvCol = nesYuv(colorIn);
+        }
         
         if(global.pn_connection_type < 1.5) {
             // Composite and S-Video
         
-            float luma = yuvCol.r / global.pn_color_amplitude;
+            float luma = yuvCol.r / ccpre_color_amplitude;
             float chroma = (yuvCol.g * sin(phase) + yuvCol.b * cos(phase));
             
             FragColor = vec4(luma, chroma, 0, 1);
-        } else if(global.pn_connection_type < 2.5) {
+        } else {
             // No Artifacts
             FragColor = vec4(yuvCol, 1);
         }

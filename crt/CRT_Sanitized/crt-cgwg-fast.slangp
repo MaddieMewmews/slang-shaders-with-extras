@@ -1,0 +1,7 @@
+shaders = 1
+
+shader0 = ../../../shaders_slang/crt/shaders/crt-cgwg-fast.slang
+filter_linear0 = false
+scale_type0 = viewport
+
+CRTCGWG_GAMMA = 2.2

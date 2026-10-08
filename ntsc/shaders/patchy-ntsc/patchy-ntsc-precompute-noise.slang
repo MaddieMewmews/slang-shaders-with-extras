@@ -12,13 +12,9 @@ You should have received a copy of the GNU General Public License along with thi
 
 */
 
-///////////////////////////////////////////////////////////////
-// This pass is no longer used in the latest version.        //
-// It is kept for backward compatibility with older presets. //
-// It will be removed in a later release.                    //
-///////////////////////////////////////////////////////////////
+// This shader runs BEFORE EVERYTHING ELSE and generates convincing-looking noise, with four samples per pixel.
 
-// This pass generates noise and adds it to the signal.
+#pragma name GenerateNoise
 
 layout(push_constant) uniform Push
 {
@@ -48,26 +44,32 @@ layout(location = 0) in vec2 vTexCoord;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 2) uniform sampler2D Source;
 
-// Includes lowpass and bandpass functions
+// Includes lowpass and bandpass functions.
+// Using DONT_DO_SIGNAL_RES sets SIGNAL_RES to 1, which is
+// important because we're still dealing with the console's
+// raw pixels, not samples of the video signal.
+#define DONT_DO_SIGNAL_RES
 #include "patchy-ntsc-inc-filters.inc"
 
 #define euler 2.7182818284
 
-float getNoise() {
+vec4 getNoise() {
     // Compensate for cropped overscan, assuming equal crop on both sides.
     // Current position in pixels, both x and y being decimal numbers.
+    
     vec2 pixelCoord = realPixelCoord();
-    float realOffX = pixelCoord.x / getSizes().x;
-    float noise = 0.0;
+    vec4 offsets = vec4(0, 0.25, 0.5, 0.75);
+    vec4 realOffX = (vec4(pixelCoord.x) + offsets) / getSizes().x;
+    vec4 noise = vec4(0.0);
     
     // Add RF noise
     // 256 / 341.25 comes from the comments in NTSC-CRT (by EMMIR) about its SNES signal emulation.
     // 256 is the number of game pixels per scanline, while 341.25 is the duration of a line of the video signal.
     // It's a close match to the NES's exactly 341 PPU pixels per line, as stated on the nesdev wiki.
-    float offsetXPart = realOffX * ccpre_scanline_dur / global.pn_total_scanline_dur;
+    vec4 offsetXPart = realOffX * ccpre_scanline_dur / global.pn_total_scanline_dur;
     int offsetYPart = int(pixelCoord.y + 0.5);
     int offsetFramePart = int(params.FrameCount + 0.5);
-    float offsetFull = offsetXPart + offsetYPart + ccpre_num_lines * offsetFramePart;
+    vec4 offsetFull = offsetXPart + vec4(offsetYPart + ccpre_num_lines * offsetFramePart);
     
     // https://en.wikipedia.org/wiki/Linear_congruential_generator
     const uint modulus = 0x7fffffff; // Use & instead of % for better performance
@@ -94,7 +96,7 @@ float getNoise() {
 //        float overAmtFrame = overAmt * ccpre_num_lines;
         
         noise += (global.pn_noise_mode > 3.5 ? RNG(heightRng) * rate / 200000 : global.pn_noise_mode > 2.5 ? pow(2, rate / 227.5) / 20000 : global.pn_noise_mode > 1.5 ? rate / 400000 : global.pn_noise_mode > 0.5 ? 1.0 / rate * 2 : 1.0 / global.pn_noise_counter)
-                        * sin(offsetXPart * rate + offsetYPart * overAmt + offsetFramePart * overAmtFrame) * global.pn_noise_severity;
+                        * sin(offsetXPart * rate + vec4(offsetYPart * overAmt + offsetFramePart * overAmtFrame)) * global.pn_noise_severity;
     }
     
 #undef RNG
@@ -104,10 +106,6 @@ float getNoise() {
 
 void main()
 {
-    vec4 orig = texture(Source, vTexCoord);
-    if(global.pn_connection_type < -0.5)
-        orig.r += getNoise();
-    
-    FragColor = orig;
+    FragColor = getNoise();
 }
 
