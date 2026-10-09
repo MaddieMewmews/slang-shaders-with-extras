@@ -1,0 +1,10 @@
+shaders = 1
+
+shader0 = ../p68k-fast-mp-append-hdr.slang
+filter_linear0 = false
+float_framebuffer0 = true
+frame_count_mod0 = 2
+scale_type_x0 = source
+scale_x0 = 1
+scale_type_y0 = source
+scale_y0 = 1
