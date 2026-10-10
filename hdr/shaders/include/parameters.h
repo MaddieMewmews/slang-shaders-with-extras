@@ -17,7 +17,17 @@
 #pragma parameter hcrt_space4                        " "                                                            0.0      0.0   0.0001   0.0001
 #pragma parameter hcrt_max_nits                      "    HDR: Display's Peak Luminance"                            1000.0   0.0   10000.0  10.0
 #pragma parameter hcrt_paper_white_nits              "    HDR: Display's Paper White Luminance"                     200.0    0.0   10000.0  10.0
-#pragma parameter hcrt_expand_gamut                  "    HDR: Original/Vivid"                                      0.0      0.0   1.0      1.0
+#pragma parameter hcrt_support8                      "    "       0.0      0.0   0.0001   0.0001
+#pragma parameter hcrt_expand_gamut                  "    HDR: Content Color Gamut"                                      0.0      0.0   14.0      1.0
+#pragma parameter hcrt_support9                      "    "       0.0      0.0   0.0001   0.0001
+#pragma parameter hcrt_support10                      "    0:709/1:E709/2:1953/3:1958/4:1964/5:601"       0.0      0.0   0.0001   0.0001
+#pragma parameter hcrt_support11                      "    6:PAL/7:P22-J/8:P22-80/9:Apple RGB/10:PhilipsPC"       0.0      0.0   0.0001   0.0001
+#pragma parameter hcrt_support12                      "    11:P22-90/12:RPTV/13:DP3/14:2020"       0.0      0.0   0.0001   0.0001
+#pragma parameter hcrt_support13                      "    "       0.0      0.0   0.0001   0.0001
+#pragma parameter hcrt_support14                      "    This setting (hypothetically) replaces the"       0.0      0.0   0.0001   0.0001
+#pragma parameter hcrt_support15                      "    Colour System and Phosphors options in HDR."       0.0      0.0   0.0001   0.0001
+#pragma parameter hcrt_support16                      "    Use Colour Accurate and, under CRT SETTINGS,"       0.0      0.0   0.0001   0.0001
+#pragma parameter hcrt_support17                      "    Set Colour System to r709 and Phosphors to NONE"       0.0      0.0   0.0001   0.0001
 #pragma parameter hcrt_space5                        " "                                                            0.0      0.0   0.0001   0.0001
 #pragma parameter hcrt_colour_space                  "    SDR: Display's Colour Space: r709 | sRGB | DCI-P3"        1.0      0.0   2.0      1.0
 #pragma parameter hcrt_r709_gamma_out                "    SDR: r709 Gamma"                                          2.22     1.0   5.0      0.01
