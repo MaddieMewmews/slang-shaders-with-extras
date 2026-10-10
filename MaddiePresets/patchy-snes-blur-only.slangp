@@ -1,0 +1,11 @@
+# Patchy SNES's linear blur. Not at all accurate to real 2chip SNES blur effect.
+#reference "../ntsc/patchy-snes.slangp"
+pn_signal_res = "6.000000"
+pn_connection_type = "2.000000"
+pn_demodulator_std = "0.000000"
+pn_demodulator_std_defaults = "-1.000000"
+pn_auto_contrast = "0.000000"
+pn_knob_contrast = "1.000000"
+pn_knob_brightness = "0.100000"
+lut_toggle = "0.000000"
+lut_index = "0.000000"

@@ -1,0 +1,3 @@
+#reference "../hdr/crt-sony-megatron-v2-default.slangp"
+hcrt_lcd_subpixel = "2.000000"
+hcrt_crt_screen_type = "2.000000"

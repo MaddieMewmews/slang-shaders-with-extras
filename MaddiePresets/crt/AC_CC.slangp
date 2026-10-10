@@ -1,0 +1,2 @@
+#reference "../hdr/sony_megatron_v2_presets/crt-sony-megatron-v2-bang-olufsen-mx8000.slangp"
+hcrt_lcd_subpixel = "2.000000"
