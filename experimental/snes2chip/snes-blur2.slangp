@@ -1,0 +1,3 @@
+#reference "snes-blur.slangp"
+AlphaFall = "0.800000"
+ChannelCapacitanceDrag = "0.200000"

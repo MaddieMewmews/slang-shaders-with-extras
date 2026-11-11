@@ -1,0 +1,12 @@
+shaders = "1"
+shader0 = "shaders/snes-2chip.slang"
+alias0 = ""
+wrap_mode0 = "clamp_to_border"
+mipmap_input0 = "false"
+filter_linear0 = "false"
+float_framebuffer0 = "false"
+srgb_framebuffer0 = "false"
+scale_typex0 = source
+scale_x0 = 16.0
+scale_typey0 = source
+scale_y0 = 1.0
