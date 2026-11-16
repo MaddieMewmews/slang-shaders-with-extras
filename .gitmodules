@@ -1,3 +1,6 @@
 [submodule "retro-display-lab"]
 	path = retro-display-lab
 	url = https://github.com/JohnnySun/retro-display-lab
+[submodule "experimental/real-crt-phosphor"]
+	path = experimental/real-crt-phosphor
+	url = https://github.com/crt2oldgamer-stack/real-crt-phosphor
