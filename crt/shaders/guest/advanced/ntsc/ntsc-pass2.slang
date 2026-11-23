@@ -9,7 +9,6 @@ layout(push_constant) uniform Push
    vec4 OutputSize;
    vec4 OriginalSize;
    vec4 SourceSize;
-   float ntsc_scale;
    float ntsc_phase;
    float ntsc_ring;
    float ntsc_cscale;
@@ -20,6 +19,9 @@ layout(push_constant) uniform Push
    float ntsc_charp3;
    float speedup;
    float nscale;
+   float ntsc_dith;
+   float ntsc_samp;
+   float ntsc_gamma;
 } params;
 
 layout(std140, set = 0, binding = 0) uniform UBO
@@ -27,71 +29,52 @@ layout(std140, set = 0, binding = 0) uniform UBO
 	mat4 MVP;
 } global;
 
-#pragma parameter auto_res "          SNES/Amiga Hi-Res Auto Mode" 0.0 0.0 1.0 1.0
-#pragma parameter speedup  "          Speedup w. higher Internal Res." 1.0 1.0 4.0 1.0
-#pragma parameter ntsc_scale   "NTSC Resolution Scaling" 1.0 0.20 2.5 0.025
-#pragma parameter nscale       "NTSC Filter Scaling" 1.0 0.20 2.5 0.025
+#pragma parameter auto_res  "          SNES/Amiga Hi-Res Auto Mode" 0.0 0.0 1.0 1.0
+#pragma parameter speedup   "          Speedup w. higher Internal Res." 1.0 1.0 4.0 1.0
+#pragma parameter ntsc_samp "          Hi-Res Sampling Behaviour: Default | Old" 1.0 1.0 2.0 1.0
+#pragma parameter ntsc_gamma   "NTSC Filtering Gamma Correction" 1.0 0.25 2.5 0.025
 #pragma parameter ntsc_phase   "NTSC Phase: Auto | 2 phase | 3 phase | Mixed | PCE" 1.0 1.0 5.0 1.0
-#pragma parameter ntsc_taps    "NTSC # of Taps (Filter Width)" 32.0 6.0 48.0 1.0
-#pragma parameter ntsc_cscale  "NTSC Chroma Scaling / Bleeding (2-phase)" 1.0 0.50 4.00 0.05
-#pragma parameter ntsc_cscale1 "NTSC Chroma Scaling / Bleeding (3-phase)" 1.0 0.20 2.25 0.05
+#pragma parameter nscale       "NTSC Filter (Resolution) Scaling" 1.25 0.20 5.0 0.05
+#pragma parameter ntsc_dith    "NTSC De-dithering: 0:OFF | 1:CB+BAR | 2:CB+Bar-S | 3:CB-Mixed" 2.0 0.0 3.0 1.0
+#pragma parameter ntsc_taps    "NTSC # of Taps (Filter Width)" 32.0 6.0 32.0 1.0
+#pragma parameter ntsc_cscale  "NTSC Chroma Scaling / Bleeding (2-phase)" 1.0 0.20 5.00 0.05
+#pragma parameter ntsc_cscale1 "NTSC Chroma Scaling / Bleeding (3-phase)" 1.0 0.20 2.50 0.05
 #pragma parameter ntsc_charp   "NTSC Preserve 'Edge' Colors 2-phase" 0.0 0.0 10.0 0.50
 #pragma parameter ntsc_charp3  "NTSC Preserve 'Edge' Colors 3-phase" 0.0 0.0 10.0 0.50
 #pragma parameter ntsc-row4 "------------------------------------------------" 0.0 0.0 0.0 1.0
 #pragma parameter ntsc_ring    "NTSC Anti-Ringing" 0.5 0.0 1.0 0.10
 
-float auto_rez = mix(1.0, 0.5, clamp(params.auto_res * round(params.OriginalSize.x/300.0)-1.0, 0.0, 1.0));
-#define ntsc_scale params.ntsc_scale * auto_rez
 #define speedup params.speedup
 #define nscale params.nscale;
+#define ntsc_dith params.ntsc_dith
 
 #pragma stage vertex
 layout(location = 0) in vec4 Position;
 layout(location = 1) in vec2 TexCoord;
 layout(location = 0) out vec2 vTexCoord;
+layout(location = 1) out float phase;
 
 void main()
 {
    gl_Position = global.MVP * Position;
-   vTexCoord = TexCoord + vec2(0.5 / speedup * (params.OriginalSize.z/auto_rez)/4.0, 0.0);    // Compensate for decimate-by-2.
+   vTexCoord = TexCoord + vec2(0.5 / speedup * params.OriginalSize.z/4.0, 0.0);    // Compensate for decimate-by-2.
+   float OriginalSize = (params.OriginalSize.x < 450.0) ? params.OriginalSize.x : params.OriginalSize.x / max(round(params.OriginalSize.x / 300.0), 1.0);
+   phase = (params.ntsc_phase < 1.5) ? ((OriginalSize > 300.0 || (params.OriginalSize.x > 400.0 && params.OriginalSize.y > 250.0)) ? 2.0 : 3.0) : ((params.ntsc_phase > 2.5) ? 3.0 : 2.0);
+   if (params.ntsc_phase == 4.0) phase = 3.0; else if (params.ntsc_phase == 5.0) phase = 2.0;
 }
 
 #pragma stage fragment
 layout(location = 0) in vec2 vTexCoord;
+layout(location = 1) in float phase;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 2) uniform sampler2D Source;
 layout(set = 0, binding = 3) uniform sampler2D PrePass0;
 
 
-vec3 fetch_offset2(vec2 dx)
-{
-   return texture(Source, vTexCoord + dx).xyz + texture(Source, vTexCoord - dx).xyz;
-}
 
-vec3 fetch_offset3(vec3 dx)
+vec3 fetch_offset(vec3 dx)
 {
    return vec3(texture(Source, vTexCoord + dx.xz).x + texture(Source, vTexCoord - dx.xz).x, texture(Source, vTexCoord + dx.yz).yz + texture(Source, vTexCoord - dx.yz).yz);
-}
-
-const mat3 yiq2rgb_mat = mat3(
-   1.0, 0.956, 0.6210,
-   1.0, -0.2720, -0.6474,
-   1.0, -1.1060, 1.7046);
-
-vec3 yiq2rgb(vec3 yiq)
-{
-   return yiq * yiq2rgb_mat;
-}
-
-const mat3 yiq_mat = mat3(
-      0.2989, 0.5870, 0.1140,
-      0.5959, -0.2744, -0.3216,
-      0.2115, -0.5229, 0.3114
-);
-
-vec3 rgb2yiq(vec3 col)
-{
-   return col * yiq_mat;
 }
 
 float get_luma(vec3 c)
@@ -100,6 +83,11 @@ float get_luma(vec3 c)
 }
 
 float smothstep (float e0, float e1, float x)
+{
+   return clamp((x - e0) / (e1 - e0), 0.0, 1.0);
+}
+
+vec3 smstep (vec3 e0, vec3 e1, vec3 x)
 {
    return clamp((x - e0) / (e1 - e0), 0.0, 1.0);
 }
@@ -142,6 +130,42 @@ const float luma_filter_2_phase[33] = float[33](
    0.139044281,
    0.168055832,
    0.178571429);
+
+
+const float chroma_filter_2_phase[33] = float[33](
+   1.00000,
+   2.00000,
+   3.00000,
+   4.00000,
+   5.00000,
+   6.00000,
+   7.00000,
+   8.00000,
+   9.00000,
+  10.00000,
+  11.00000,
+  12.00000,
+  13.00000,
+  14.00000,
+  15.00000,
+  16.00000,
+  17.00000,
+  18.00000,
+  19.00000,
+  20.00000,
+  21.00000,
+  22.00000,
+  23.00000,
+  24.00000,
+  25.00000,
+  26.00000,
+  27.00000,
+  28.00000,
+  29.00000,
+  30.00000,
+  31.00000,
+  32.00000,
+  33.00000);
 
 const float chroma_filter_3_phase[33] = float[33](
    0.000000000,
@@ -218,13 +242,84 @@ float luma_filter_3_phase[33] = float[33](
    0.135563500,
    0.175261268,
    0.220176552);
+ 
+   float res = nscale;
+   vec2 TexD = (floor(vTexCoord * params.OriginalSize.xy) + 0.5)*params.OriginalSize.zw;
+   float dd = 1.0;
+   
+   if (ntsc_dith > 0.5 && params.OriginalSize.y < 300.0 && (phase == 2.0 || params.ntsc_phase > 3.5))
+   {
+      vec2 TexD = (floor(vTexCoord * params.OriginalSize.xy) + 0.5)*params.OriginalSize.zw;
+      vec2 xx = vec2(params.OriginalSize.z, 0.0);
+      vec2 yy = vec2(0.0, params.OriginalSize.w);
+      vec3 ca = vec3(get_luma(texture(PrePass0, TexD - xx - xx - yy).rgb), get_luma(texture(PrePass0, TexD - xx - xx).rgb), get_luma(texture(PrePass0, TexD - xx - xx + yy).rgb));
+      vec3 c0 = vec3(get_luma(texture(PrePass0, TexD - xx - yy).rgb), get_luma(texture(PrePass0, TexD - xx).rgb), get_luma(texture(PrePass0, TexD - xx + yy).rgb));
+      vec3 c1 = vec3(get_luma(texture(PrePass0, TexD - yy).rgb), get_luma(texture(PrePass0, TexD).rgb), get_luma(texture(PrePass0, TexD +yy).rgb));
+      vec3 c2 = vec3(get_luma(texture(PrePass0, TexD + xx - yy).rgb), get_luma(texture(PrePass0, TexD + xx).rgb), get_luma(texture(PrePass0, TexD + xx + yy).rgb));
+      vec3 cb = vec3(get_luma(texture(PrePass0, TexD + xx + xx - yy).rgb), get_luma(texture(PrePass0, TexD + xx + xx).rgb), get_luma(texture(PrePass0, TexD + xx + xx + yy).rgb));
+	  vec3 line0  = step(min(abs(c1-c0),abs(c2-c1)), 0.01.xxx);
+           line0  =	max(step(abs(c1-c0)+abs(c2-c1), abs(c0-c2)),line0);  
+      vec3 line1  = max(step(min(abs(ca-c0),abs(c2-cb)), 0.01.xxx), line0);
+      vec3 line2  = max(step(min(abs(ca-c2),abs(c0-cb)), 0.01.xxx), line1);
+      vec3 line3  = max(step(max(abs(ca-c0),abs(c2-cb)), 0.15.xxx), line2);	  
+	  vec3 line4  = max(smstep(0.075.xxx, 0.35*max(c1,1.0-c1), max(min(abs(c1-cb),abs(c0-c2)),min(abs(c1-ca),abs(c0-c2)))), line3);
+      vec3 line5  = step(min(max(abs(c0-c2),abs(c1-ca)),max(abs(c0-c2),abs(c1-cb))), 0.025.xxx);
+	  float dth   = smothstep(0.175, 0.25, max(abs(c1.y-c0.y),abs(c1.y-c2.y)));
+	  vec3 linebar = mix(line3, line0, line5);
+	  vec3 linecb = mix(mix(line3, line4, dth), line0, line5);
 
-   float res = ntsc_scale * nscale;
-   float OriginalSize = params.OriginalSize.x * auto_rez; 
-   vec2 one_x = 0.25*params.OriginalSize.zz / res / speedup;
+	  float line6 = dth*min(step(min(abs(c1.y-c1.x),abs(c1.y-c1.z)),0.03), max(step(max(abs(c0.y-c0.x),abs(c0.y-c0.z)),0.03) , step(max(abs(c2.y-c2.x),abs(c2.y-c2.z)),0.03)));
+	  linecb.y = (min(max(abs(c1.y-c1.x),abs(c0.y-c0.x)), max(abs(c1.y-c1.x),abs(c2.y-c2.x))) < 0.025) ? max(linecb.y, dth) : linecb.y;
+	  linecb.y = (min(max(abs(c1.y-c1.z),abs(c0.y-c0.z)), max(abs(c1.y-c1.z),abs(c2.y-c2.z))) < 0.025) ? max(linecb.y, dth) : linecb.y;	  
+	  
+      linebar.y = min(linebar.y, max(linebar.x,linebar.z));
+      linecb.y  = max(linecb.y, line6);
+
+      float linres = (ntsc_dith < 2.5) ? linebar.y : linecb.y;
+    
+   if (ntsc_dith == 2.0 && linebar.y < 0.5 && linecb.y > 0.5)
+   {   
+	  float mn = 1.0; float mx = 0.0; float cbi = 0.0; float bri = 0.0; float b1 = 0.0; float b2 = 0.0;
+
+      float tmp = 0.0; float dmp = 0.0;
+      for (float i = -1.0; i <= 1.0; i++) 
+	     for (float j = -1.0; j <= 1.0; j++)
+	     {
+		 	  if (fract(texture(Source, TexD + i*xx + j*yy).a) < 0.25) { tmp = get_luma(texture(PrePass0, TexD  + i*xx + j*yy).rgb); mn = min(mn, tmp); mx = max(mx,tmp); }
+		 }
+      
+	  float ii[4] = float[4] (3.0,2.0,2.0,1.0);
+	  
+      for (float j = -3.0; j <= 3.0; j++)
+         for (float i = -ii[int(abs(j))]; i <= ii[int(abs(j))]; i++)
+	     {
+		 	  tmp = get_luma(texture(PrePass0, TexD + i*xx + j*yy).rgb);
+			  dmp = texture(Source, TexD  + i*xx + j*yy).a;
+			  if (dmp > 0.75 && (abs(tmp-mn) < 0.025 ||  abs(tmp-mx) < 0.025)) cbi++;
+			  if (dmp < 0.25 && (abs(tmp-mn) > 0.025 &&  abs(tmp-mx) > 0.025)) bri++;			  
+		 }
+	  
+      for (float i = 0.0; i < 12.0; i++) 
+	     if (max(min(fract(texture(Source, TexD - i*yy-xx).a), fract(texture(Source, TexD - i*yy).a)), min(fract(texture(Source, TexD - i*yy+xx+xx).a), fract(texture(Source, TexD - i*yy+xx+xx).a))) < 0.25) b1++; else break;
+      for (float i = 0.0; i < 12.0; i++) 
+	     if (max(min(fract(texture(Source, TexD + i*yy-xx).a), fract(texture(Source, TexD + i*yy).a)), min(fract(texture(Source, TexD + i*yy+xx+xx).a), fract(texture(Source, TexD + i*yy+xx+xx).a))) < 0.25) b2++; else break;
+
+	  
+	  if ((cbi > bri) && (b1+b2) < 12.0) linres = linecb.y;
+	}
+	
+	  float nd = max(res-1.0, 0.0);
+      dd = 1.0 + (1.0-linres) * nd;
+	  res /= dd;
+   }
+
+   float ntsc_sizex = (params.ntsc_samp > 1.5) ? params.OriginalSize.x : ((params.OriginalSize.x < 450.0) ? params.OriginalSize.x : (phase == 2.0) ? 320.0 : 256.0);
+   vec2 one_x = 0.25 / ntsc_sizex.xx;
+   one_x.x = one_x.x / res / speedup;
+   one_x.y = one_x.y / speedup;
+   
    vec3 signal = vec3(0.0);
-   float phase = (params.ntsc_phase < 1.5) ? ((OriginalSize > 300.0) ? 2.0 : 3.0) : ((params.ntsc_phase > 2.5) ? 3.0 : 2.0);
-   if (params.ntsc_phase > 3.5) { phase = 3.0; luma_filter_3_phase = luma_filter_2_phase; }
+   if (params.ntsc_phase > 3.5) { luma_filter_3_phase = luma_filter_2_phase; }
 
    float offset = 0.0; int i = 0; float j = 0.0;
    vec3 wsum = 0.0.xxx;
@@ -233,26 +328,26 @@ float luma_filter_3_phase[33] = float[33](
 
    if(phase < 2.5)
    {
-      float iloop = max(params.ntsc_taps, 8.0);
-      if (params.ntsc_charp > 0.25) iloop = min(iloop, 14.0);
-      int loopstart = int(TAPS_2_phase - iloop);
-	  
-      float ltap = iloop + 1.0;
-      float cs_sub = iloop - iloop / params.ntsc_cscale;
-      float ctap = 0.0;
-      float mit = 1.0 + 0.04*pow(smothstep(16.0, 8.0, iloop), 0.5);
-      vec2 dx = vec2(one_x.x*mit, 0.0); vec2 dx1 = dx;
+      one_x.y = one_x.y/params.ntsc_cscale;
+      vec3 dx = vec3(one_x.x, one_x.y, 0.0);
+      float mit = 1.0;
+      float iloop = params.ntsc_taps;
+      iloop = max(iloop, 8.0); mit = 1.0 + 0.04*pow(smothstep(16.0, 8.0, iloop), 0.5);
+      vec3 dx1 = dx; dx.x*=mit;
+      int loopstart = int(32.0 - iloop);
+	  int j = loopstart;
 	  
       for (i = loopstart; i < 32; i++)
       {
-         offset = float(i-loopstart); j = offset + 1.0; dx1 = (offset - iloop)*dx;
-         sums = fetch_offset2(dx1); ctap = max(j-cs_sub, 0.0);
-         tmp = vec3(luma_filter_2_phase[max(i,0)], ctap.xx);
+         offset = float(i-loopstart); dx1.xy = (offset - iloop)*dx.xy;
+         j = i - loopstart;
+		 sums = fetch_offset(dx1);
+         tmp = vec3(luma_filter_2_phase[i], chroma_filter_2_phase[j].xx);
          wsum = wsum + tmp;
          signal += sums * tmp;
       }
-      ctap = ltap - cs_sub;
-      tmp = vec3(luma_filter_2_phase[TAPS_2_phase], ctap.xx);
+      j = int(iloop);
+	  tmp = vec3(luma_filter_2_phase[TAPS_2_phase], chroma_filter_2_phase[j], chroma_filter_2_phase[j]);
       wsum = wsum + wsum + tmp;
       signal += texture(Source, vTexCoord).xyz * tmp;
       signal = signal / wsum;
@@ -270,7 +365,7 @@ float luma_filter_3_phase[33] = float[33](
       for (i = loopstart; i < 32; i++)
       {
          offset = float(i-loopstart); dx1.xy = (offset - iloop)*dx.xy;
-         sums = fetch_offset3(dx1);
+         sums = fetch_offset(dx1);
          tmp = vec3(luma_filter_3_phase[i], chroma_filter_3_phase[i].xx);
          wsum = wsum + tmp;
          signal += sums * tmp;
@@ -286,15 +381,15 @@ float luma_filter_3_phase[33] = float[33](
    if (params.ntsc_ring > 0.05)
    {
       vec2 dx = vec2(params.OriginalSize.z / min(res, 1.0) / speedup, 0.0);
-      float a = texture(Source, vTexCoord - 2.0*dx).a;
-      float b = texture(Source, vTexCoord -     dx).a;
-      float c = texture(Source, vTexCoord + 2.0*dx).a;
-      float d = texture(Source, vTexCoord +     dx).a;
-      float e = texture(Source, vTexCoord         ).a;	  
+      float a = get_luma(texture(PrePass0, vTexCoord - 2.0*dx).rgb);
+      float b = get_luma(texture(PrePass0, vTexCoord -     dx).rgb);
+      float c = get_luma(texture(PrePass0, vTexCoord + 2.0*dx).rgb);
+      float d = get_luma(texture(PrePass0, vTexCoord +     dx).rgb);
+      float e = get_luma(texture(PrePass0, vTexCoord         ).rgb);	  
       signal.x = mix(signal.x, clamp(signal.x, min(min(min(a,b),min(c,d)),e), max(max(max(a,b),max(c,d)),e)), params.ntsc_ring);
    }
    
-   float orig = get_luma(texture(PrePass0, vTexCoord * vec2(speedup, 1.0)).rgb);
-   
+   float orig = get_luma(texture(PrePass0, TexD * vec2(speedup, 1.0)).rgb);
+   orig = pow(orig, params.ntsc_gamma);   
    FragColor = vec4(signal, orig);
 }  

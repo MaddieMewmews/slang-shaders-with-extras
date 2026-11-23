@@ -243,12 +243,11 @@ vec3 fix_lut(vec3 lutcolor, vec3 ref)
 
 
 float vignette(vec2 pos) {
-	vec2 b = vec2(params.vigdef, params.vigdef) *  vec2(1.0, params.OriginalSize.x/params.OriginalSize.y) * 0.125;
-	pos = clamp(pos, 0.0, 1.0);
-	pos = abs(2.0*(pos - 0.5));
-	vec2 res = mix(0.0.xx, 1.0.xx, smoothstep(1.0.xx, 1.0.xx-b, sqrt(pos)));
-	res = pow(res, 0.70.xx);	
-	return max(mix(1.0, sqrt(res.x*res.y), params.vigstr), 0.0);
+	float b = params.vigdef * 0.125;
+	pos = abs(2.0*(pos - 0.5)); pos*=pos*pos;
+	float dist = pow(dot(pos,pos),0.05);
+	float res = mix(0.0, 1.0, smoothstep(1.0, 1.0-b, dist));
+	return max(mix(1.0, res, params.vigstr), 0.0);
 }
 
 

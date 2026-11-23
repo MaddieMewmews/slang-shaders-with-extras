@@ -58,7 +58,7 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #pragma parameter inter "          Interlace Trigger Resolution :" 375.0 0.0 800.0 25.0
 #define inter         params.inter     // interlace resolution
 
-#pragma parameter interm "          Interlace Mode: OFF, Normal 1-3,6; Interpolation 4-5" 2.0 0.0 6.0 1.0
+#pragma parameter interm "          Interlace Mode: OFF, Normal 1-3,6; Interpolation 4-5" 4.0 0.0 6.0 1.0
 #define interm         params.interm     // interlace mode 
 
 #pragma parameter iscan "          Interlacing Scanline Effect ('Laced brightness)" 0.20 0.0 1.0 0.05

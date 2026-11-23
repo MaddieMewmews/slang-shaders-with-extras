@@ -25,7 +25,7 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #pragma parameter pal-row0    "[ PAL CONTROLS ]:"               0.0 0.0 0.0 1.00
 #pragma parameter pal-row1    "-------------------------------------------------" 0.0 0.0 0.0 1.0
 #pragma parameter PAL_FILT    "          PAL Connection: RF | Composite | S-Video | SCART " 2.00 1.00 4.00 1.00
-#pragma parameter filter_res  "          Horizontal Filtering Resolution" 1.0 0.5 8.0 0.10
+#pragma parameter filter_res  "          Horizontal Filtering Resolution" 1.0 0.5 8.0 0.05
 #pragma parameter auto_res    "          SNES/Amiga Hi-Res Auto Mode" 0.0 0.0 1.0 1.0
 #pragma parameter PHMOD       "          PAL Phase: Auto | Progressive | Laced (Dot Crawl)" 0.0 0.0 2.0 1.0
 #pragma parameter pal-row2    "-------------------------------------------------" 0.0 0.0 0.0 1.0

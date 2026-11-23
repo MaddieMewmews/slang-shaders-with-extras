@@ -10,10 +10,13 @@ layout(push_constant) uniform Push
    vec4 OriginalSize;
    vec4 SourceSize;
    uint FrameCount;
-   float quality, ntsc_sat, cust_fringing, cust_artifacting, ntsc_bright, ntsc_scale, ntsc_fields, ntsc_phase, ntsc_gamma, ntsc_rainbow1, ntsc_taps, auto_res;
+   float quality, ntsc_sat, cust_fringing, cust_artifacting, ntsc_bright, ntsc_fields, ntsc_phase, ntsc_gamma, ntsc_rainbow1, ntsc_taps, auto_res;
    float ntsc_charp;
    float ntsc_charp3;
    float speedup;
+   float ntsc_dith;
+   float nscale;
+   float ntsc_samp;
 } params;
 
 layout(std140, set = 0, binding = 0) uniform UBO
@@ -23,8 +26,9 @@ layout(std140, set = 0, binding = 0) uniform UBO
 
 #pragma parameter ntsc-row0 "------------------------------------------------" 0.0 0.0 0.0 1.0
 #pragma parameter auto_res     "          SNES/Amiga Hi-Res Auto Mode" 0.0 0.0 1.0 1.0
-#pragma parameter filter_res   "          Horizontal Filtering Resolution" 1.0 0.5 8.0 0.10
+#pragma parameter filter_res   "          Horizontal Filtering Resolution" 1.0 0.5 8.0 0.05
 #pragma parameter speedup      "          Speedup w. higher Internal Res." 1.0 1.0 4.0 1.0
+#pragma parameter ntsc_samp    "          Hi-Res Sampling Behaviour: Default | Old" 1.0 1.0 2.0 1.0
 #pragma parameter ntsc-row1 "------------------------------------------------" 0.0 0.0 0.0 1.0
 #pragma parameter quality "INFO --> A&F Values: Svideo = 0.0 | Composite = 1.0 | RF = 2.0" 0.0 0.0 0.0 1.0
 #pragma parameter cust_artifacting "NTSC Artifacting Value" 1.0 0.0 5.0 0.1
@@ -32,23 +36,32 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #pragma parameter ntsc-row2 "------------------------------------------------" 0.0 0.0 0.0 1.0
 #pragma parameter ntsc_fields "NTSC Merge Fields: Auto | NO | YES" -1.0 -1.0 1.0 1.0
 #pragma parameter ntsc_phase  "NTSC Phase: Auto | 2 phase | 3 phase | Mixed | PCE" 1.0 1.0 5.0 1.0
-#pragma parameter ntsc_scale  "NTSC Resolution Scaling" 1.0 0.20 2.5 0.025
-#pragma parameter nscale      "NTSC Filter Scaling" 1.0 0.20 2.5 0.025
+#pragma parameter nscale      "NTSC Filter (Resolution) Scaling" 1.25 0.20 5.0 0.05
+#pragma parameter ntsc_dith   "NTSC De-dithering: 0:OFF | 1:CB+BAR | 2:CB+Bar-S | 3:CB-Mixed" 2.0 0.0 3.0 1.0
 #pragma parameter ntsc_sat    "NTSC Color Saturation" 1.0 0.0 2.0 0.01
 #pragma parameter ntsc_bright "NTSC Brightness" 1.0 0.0 1.5 0.01
 #pragma parameter ntsc_gamma  "NTSC Filtering Gamma Correction" 1.0 0.25 2.5 0.025
 #pragma parameter ntsc_rainbow1 "NTSC Coloring/Rainbow Effect (2-phase)" 0.0 0.0 3.0 1.0
 #pragma parameter ntsc-row3 "------------------------------------------------" 0.0 0.0 0.0 1.0
-#pragma parameter ntsc_taps   "NTSC # of Taps (Filter Width)" 32.0 6.0 48.0 1.0
+#pragma parameter ntsc_taps   "NTSC # of Taps (Filter Width)" 32.0 6.0 32.0 1.0
 #pragma parameter ntsc_charp  "NTSC Preserve 'Edge' Colors 2-phase" 0.0 0.0 10.0 0.50
 #pragma parameter ntsc_charp3 "NTSC Preserve 'Edge' Colors 3-phase" 0.0 0.0 10.0 0.50
 
 float FrameCount = float(params.FrameCount);
-float auto_rez = mix(1.0, 0.5, clamp(params.auto_res * round(params.OriginalSize.x/300.0)-1.0, 0.0, 1.0));
-#define ntsc_scale params.ntsc_scale * auto_rez
 #define speedup params.speedup
-
 #define PI 3.14159265
+#define ntsc_dith params.ntsc_dith
+
+float smothstep (float e0, float e1, float x)
+{
+   return clamp((x - e0) / (e1 - e0), 0.0, 1.0);
+}
+
+vec3 smstep (vec3 e0, vec3 e1, vec3 x)
+{
+   return clamp((x - e0) / (e1 - e0), 0.0, 1.0);
+}
+
 
 #pragma stage vertex
 layout(location = 0) in vec4 Position;
@@ -62,17 +75,21 @@ layout(location = 5) out float FRINGING;
 layout(location = 6) out float ARTIFACTING;
 layout(location = 7) out float CHROMA_MOD_FREQ;
 layout(location = 8) out float MERGE;
+layout(location = 9) out float MIT;
 
 void main()
 {
-	float res = min(ntsc_scale, 1.0);
-	float OriginalSize = params.OriginalSize.x * auto_rez;
 	gl_Position = global.MVP * Position;
 	vTexCoord = TexCoord * vec2(speedup, 1.0);
-	pix_no = vTexCoord * params.OriginalSize.xy * vec2(res, res/auto_rez) * vec2(4.0, 1.0);
-	
-	phase = (params.ntsc_phase < 1.5) ? ((OriginalSize > 300.0) ? 2.0 : 3.0) : ((params.ntsc_phase > 2.5) ? 3.0 : 2.0);
+
+	float OriginalSize = (params.OriginalSize.x < 450.0) ? params.OriginalSize.x : params.OriginalSize.x / max(round(params.OriginalSize.x / 300.0), 1.0);
+	phase = (params.ntsc_phase < 1.5) ? ((OriginalSize > 300.0 || (params.OriginalSize.x > 400.0 && params.OriginalSize.y > 250.0)) ? 2.0 : 3.0) : ((params.ntsc_phase > 2.5) ? 3.0 : 2.0);
 	if (params.ntsc_phase == 4.0) phase = 3.0; else if (params.ntsc_phase == 5.0) phase = 2.0;
+	float ntsc_sizex = (params.OriginalSize.x < 400.0) ? params.OriginalSize.x : (phase == 2.0) ? 320.0 : 256.0;
+	ntsc_sizex = (params.ntsc_samp < 1.5) ? ntsc_sizex : params.OriginalSize.x;
+	float ntsc_sizey = params.OriginalSize.y / max(round(params.OriginalSize.y / 220.0), 1.0);
+	pix_no = vTexCoord * vec2(ntsc_sizex,ntsc_sizey) * vec2(4.0, 1.0);
+	pix_no.y = round(pix_no.y);
 	
 	CHROMA_MOD_FREQ = (phase == 2.0 && params.ntsc_phase != 5.0) ? (4.0 * PI / 15.0) : ((OriginalSize <= 300.0 || phase == 3.0) ? (PI / 3.0) : (PI/2.0));
 	ARTIFACTING = params.cust_artifacting;
@@ -83,6 +100,8 @@ void main()
 	if (params.ntsc_fields == -1.0 && phase == 3.0) MERGE = 1.0;
 	else if (params.ntsc_fields ==  0.0) MERGE = 0.0;
 	else if (params.ntsc_fields ==  1.0) MERGE = 1.0;	
+	MIT = params.ntsc_taps;
+	MIT = smothstep(16.0, 8.0, MIT) * 0.325;
 }
 
 #pragma stage fragment
@@ -95,6 +114,7 @@ layout(location = 5) in float FRINGING;
 layout(location = 6) in float ARTIFACTING;
 layout(location = 7) in float CHROMA_MOD_FREQ;
 layout(location = 8) in float MERGE;
+layout(location = 9) in float MIT;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 2) uniform sampler2D Source;
 
@@ -127,32 +147,69 @@ float get_luma(vec3 c)
 	return dot(c, vec3(0.2989, 0.5870, 0.1140));
 }
 
-float smothstep (float e0, float e1, float x)
-{
-   return clamp((x - e0) / (e1 - e0), 0.0, 1.0);
-}
 
+float barcheck(vec2 tex, vec2 x, vec2 y)
+{
+   float c0 = get_luma(texture(Source, tex - x + y).rgb);
+   float c1 = get_luma(texture(Source, tex     + y).rgb);
+   float c2 = get_luma(texture(Source, tex + x + y).rgb);   
+   return 1.0-step(min(abs(c1-c0),abs(c1-c2)), 0.025);
+}
 
 void main()
 {
 if (vTexCoord.x > 1.0) FragColor = 0.0.xxxx; else
-{
-
-   float res = ntsc_scale;
-   float mit = params.ntsc_taps; if (params.ntsc_charp > 0.25 && phase == 2.0) mit = clamp(mit, 8.0, min(params.ntsc_taps,14.0));
-   mit = smothstep(16.0, 8.0, mit) * 0.325;
-   
+{  
    vec3 col = texture(Source, vTexCoord).rgb;
  
    vec3 yiq = rgb2yiq(col);
    yiq.x = pow(yiq.x, params.ntsc_gamma);
    float lum = yiq.x; 
 
-   vec3 tmp =  yiq; 
-   vec3 yiq2 = yiq;	
+   vec3 tmp =  yiq;
+   vec3 yiq2 = yiq;
    vec3 yiqs = yiq;
    vec3 yiqz = yiq;
 
+   float res = params.nscale;
+   float dd = 1.0;
+   float linres = 0.0;
+   
+   if (ntsc_dith > 0.5 && params.OriginalSize.y < 300.0 && (phase == 2.0 || params.ntsc_phase > 3.5))
+   {
+      vec2 TexD = (floor(vTexCoord * params.OriginalSize.xy) + 0.5)*params.OriginalSize.zw;
+      vec2 xx = vec2(params.OriginalSize.z, 0.0);
+      vec2 yy = vec2(0.0, params.OriginalSize.w);
+      vec3 ca = vec3(get_luma(texture(Source, TexD - xx - xx - yy).rgb), get_luma(texture(Source, TexD - xx - xx).rgb), get_luma(texture(Source, TexD - xx - xx + yy).rgb));
+      vec3 c0 = vec3(get_luma(texture(Source, TexD - xx - yy).rgb), get_luma(texture(Source, TexD - xx).rgb), get_luma(texture(Source, TexD - xx + yy).rgb));
+      vec3 c1 = vec3(get_luma(texture(Source, TexD - yy).rgb), get_luma(texture(Source, TexD).rgb), get_luma(texture(Source, TexD +yy).rgb));
+      vec3 c2 = vec3(get_luma(texture(Source, TexD + xx - yy).rgb), get_luma(texture(Source, TexD + xx).rgb), get_luma(texture(Source, TexD + xx + yy).rgb));
+      vec3 cb = vec3(get_luma(texture(Source, TexD + xx + xx - yy).rgb), get_luma(texture(Source, TexD + xx + xx).rgb), get_luma(texture(Source, TexD + xx + xx + yy).rgb));
+	  vec3 line0  = step(min(abs(c1-c0),abs(c2-c1)), 0.01.xxx);
+           line0  =	max(step(abs(c1-c0)+abs(c2-c1), abs(c0-c2)),line0);  
+      vec3 line1  = max(step(min(abs(ca-c0),abs(c2-cb)), 0.01.xxx), line0);
+      vec3 line2  = max(step(min(abs(ca-c2),abs(c0-cb)), 0.01.xxx), line1);
+      vec3 line3  = max(step(max(abs(ca-c0),abs(c2-cb)), 0.15.xxx), line2);	  
+	  vec3 line4  = max(smstep(0.075.xxx, 0.35*max(c1,1.0-c1), max(min(abs(c1-cb),abs(c0-c2)),min(abs(c1-ca),abs(c0-c2)))), line3);
+      vec3 line5  = step(min(max(abs(c0-c2),abs(c1-ca)),max(abs(c0-c2),abs(c1-cb))), 0.025.xxx);
+	  float dth   = step(max(abs(c1.y-c0.y),abs(c1.y-c2.y)), 0.25);
+	  vec3 linebar = mix(line3, line0, line5); if (ntsc_dith == 2.0) linebar = line0;
+	  vec3 linecb = mix(mix(line3, line4, dth), line0, line5);
+
+	  float line6 = dth*min(step(min(abs(c1.y-c1.x),abs(c1.y-c1.z)),0.03), max(step(max(abs(c0.y-c0.x),abs(c0.y-c0.z)),0.03) , step(max(abs(c2.y-c2.x),abs(c2.y-c2.z)),0.03)));
+	  linecb.y = (min(max(abs(c1.y-c1.x),abs(c0.y-c0.x)), max(abs(c1.y-c1.x),abs(c2.y-c2.x))) < 0.025) ? max(linecb.y, dth) : linecb.y;
+	  linecb.y = (min(max(abs(c1.y-c1.z),abs(c0.y-c0.z)), max(abs(c1.y-c1.z),abs(c2.y-c2.z))) < 0.025) ? max(linecb.y, dth) : linecb.y;	  
+	  
+	  linebar.y = min(linebar.y, max(linebar.x,linebar.z));
+	  linecb.y  = max(linecb.y, line6);
+
+      linres = (ntsc_dith < 2.5) ? linebar.y : linecb.y;
+
+	  float nd = max(res-1.0, 0.0);
+      dd = 1.0 + (1.0-linres) * nd;
+	  res /= dd;
+      linres = 0.5*linebar.y + linecb.y;
+   }
 
 if (MERGE > 0.5)
 {
@@ -163,7 +220,7 @@ if (MERGE > 0.5)
    yiq2.yz *= vec2(i_mod2, q_mod2); // Modulate.
    yiq2 *= mix_mat; // Cross-talk.
    yiq2.yz *= vec2(i_mod2, q_mod2); // Demodulate.
-   yiq2.yz = mix(yiq2.yz, tmp.yz, mit);   
+   yiq2.yz = mix(yiq2.yz, tmp.yz, MIT);   
 
    if (res > 1.025)
    {
@@ -182,7 +239,7 @@ if (MERGE > 0.5)
    yiq.yz *= vec2(i_mod, q_mod); // Modulate.
    yiq *= mix_mat; // Cross-talk.
    yiq.yz *= vec2(i_mod, q_mod); // Demodulate.
-   yiq.yz = mix(yiq.yz, tmp.yz, mit);
+   yiq.yz = mix(yiq.yz, tmp.yz, MIT);
    
     if (res > 1.025)
    {
@@ -192,6 +249,7 @@ if (MERGE > 0.5)
       yiqz.yz *= vec2(i_mod, q_mod); // Modulate.
       yiq.x = dot(yiqz, mix_mat[0]); // Cross-talk.
    }
+
       
    if (params.ntsc_phase == 4.0)
    {
@@ -200,7 +258,7 @@ if (MERGE > 0.5)
 
    if (MERGE > 0.5) { if (params.ntsc_rainbow1 < 0.5 || phase > 2.5) yiq = 0.5*(yiq + yiq2); else yiq.x = 0.5*(yiq.x + yiq2.x); }
    
-   FragColor = vec4(yiq, lum);
+   FragColor = vec4(yiq, linres);
 }
 
 } 

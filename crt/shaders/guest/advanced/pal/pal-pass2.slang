@@ -224,10 +224,11 @@ void main()
       float c1 = texture(Source, TexD     ).a;
       float c2 = texture(Source, TexD + xx).a;
       float cb = texture(Source, TexD + xx + xx).a;
-
-      float line0  = smothstep(0.0075, 0.0, min(abs(c1-c0),abs(c2-c1)));
-      float line1  = max(smothstep(0.0075, 0.0, min(abs(ca-c0),abs(c2-cb))), line0);
-      float line2  = max(smothstep(0.0075, 0.0, min(abs(ca-c2),abs(c0-cb))), line1);
+      float line0  = smothstep(0.01, 0.0, min(abs(c1-c0),abs(c2-c1)));
+      float line1  = max(smothstep(0.01, 0.0, min(abs(ca-c0),abs(c2-cb))), line0);
+      float line2  = max(smothstep(0.01, 0.0, min(abs(ca-c2),abs(c0-cb))), line1);
+      float line3  = smothstep(0.01, 0.0, min(max(abs(c0-c2),abs(c1-ca)),max(abs(c0-c2),abs(c1-cb))));
+	  line2 = mix(line2, line0, line3);
       df = 1.0 + (1.0-line2) * params.pal_dith;
    }
    

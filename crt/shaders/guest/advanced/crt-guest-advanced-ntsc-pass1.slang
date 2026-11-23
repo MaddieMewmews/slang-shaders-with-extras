@@ -45,7 +45,7 @@ layout(std140, set = 0, binding = 0) uniform UBO
 	mat4 MVP;
 } global;
 
-#pragma parameter filter_res   "          Horizontal Filtering Resolution" 1.0 0.5 8.0 0.10
+#pragma parameter filter_res   "          Horizontal Filtering Resolution" 1.0 0.5 8.0 0.05
 #define filter_res params.filter_res
 
 #pragma parameter bogus_filtering "[ FILTERING OPTIONS ]: " 0.0 0.0 1.0 1.0

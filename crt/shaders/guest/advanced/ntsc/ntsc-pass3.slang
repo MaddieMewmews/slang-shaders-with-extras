@@ -38,7 +38,7 @@ float auto_rez = mix(1.0, 0.5, clamp(params.auto_res * round(params.OriginalSize
 #pragma parameter ntsc_phase    "NTSC Phase: Auto | 2 phase | 3 phase | Mixed | PCE" 1.0 1.0 5.0 1.0
 #pragma parameter ntsc_rainbow1 "NTSC Coloring/Rainbow Effect (2-phase)"  0.0 0.0 3.0 1.0
 #pragma parameter ntsc_sharp  "NTSC Sharpness (Adaptive)" 0.0 -10.0 10.0 0.50
-#pragma parameter ntsc_fonts  "NTSC Preserve Fonts (0.25 = OFF)" 0.25 0.25 0.75 0.01
+#pragma parameter ntsc_fonts  "NTSC Preserve Fonts (0.25 = OFF)" 0.25 0.25 0.75 0.05
 #pragma parameter ntsc_shape  "NTSC Sharpness Shape" 0.80 0.5 1.0 0.025
 #pragma parameter ntsc_charp  "NTSC Preserve 'Edge' Colors 2-phase" 0.0 0.0 10.0 0.50
 #pragma parameter ntsc_charp3 "NTSC Preserve 'Edge' Colors 3-phase" 0.0 0.0 10.0 0.50
@@ -59,19 +59,24 @@ layout(location = 1) in vec2 TexCoord;
 layout(location = 0) out vec2 vTexCoord;
 layout(location = 1) out vec2 vTexCoord0;
 layout(location = 2) out vec2 vTexCoord1;
+layout(location = 3) out float phase;
 
 void main()
 {
    gl_Position = global.MVP * Position;
-   vTexCoord0 = TexCoord / vec2(speedup, 1.0);
+   vTexCoord0 = TexCoord / vec2(speedup,1.0);
    vTexCoord1 = (floor(vTexCoord0*params.OriginalSize.xy)+0.5)*params.OriginalSize.zw;   
    vTexCoord  = (TexCoord + vec2(0.5 * (params.OriginalSize.z/auto_rez)/4.0, 0.0)); // Compensate for decimate-by-2.
+   float OriginalSize = (params.OriginalSize.x < 450.0) ? params.OriginalSize.x : params.OriginalSize.x / max(round(params.OriginalSize.x / 300.0), 1.0);
+   phase = (params.ntsc_phase < 1.5) ? ((OriginalSize > 300.0 || (params.OriginalSize.x > 400.0 && params.OriginalSize.y > 250.0)) ? 2.0 : 3.0) : ((params.ntsc_phase > 2.5) ? 3.0 : 2.0);
+   if (params.ntsc_phase == 4.0) phase = 3.0; else if (params.ntsc_phase == 5.0) phase = 2.0;
 }
 
 #pragma stage fragment
 layout(location = 0) in vec2 vTexCoord;
 layout(location = 1) in vec2 vTexCoord0;
 layout(location = 2) in vec2 vTexCoord1;
+layout(location = 3) in float phase;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 2) uniform sampler2D Source;
 layout(set = 0, binding = 3) uniform sampler2D NPass1;
@@ -155,32 +160,44 @@ else
    vec2 yy = vec2(0.0, params.OriginalSize.w);
    xx = vec2(params.OriginalSize.z/auto_rez/speedup, 0.0);
 
-   float phase = (params.ntsc_phase < 1.5) ? ((params.OriginalSize.x * auto_rez > 300.0) ? 2.0 : 3.0) : ((params.ntsc_phase > 2.5) ? 3.0 : 2.0);
-   if (params.ntsc_phase > 3.5) phase = 3.0;
-
    float th = (phase < 2.5) ? 0.025 : 0.0075;
 
-   float ca = texture(NPass1, texcoord0 - xx - xx).a;
-   float c0 = texture(NPass1, texcoord0 - xx).a;
-   float c1 = texture(NPass1, texcoord0     ).a;
-   float c2 = texture(NPass1, texcoord0 + xx).a;
-   float cb = texture(NPass1, texcoord0 + xx + xx).a;
+   float ca = texture(Source, texcoord0 - xx - xx).a;
+   float c0 = texture(Source, texcoord0 - xx).a;
+   float c1 = texture(Source, texcoord0     ).a;
+   float c2 = texture(Source, texcoord0 + xx).a;
+   float cb = texture(Source, texcoord0 + xx + xx).a;
 
    float line0  = smothstep(th, 0.0, min(abs(c1-c0),abs(c2-c1)));
    float line1  = max(smothstep(th, 0.0, min(abs(ca-c0),abs(c2-cb))), line0);
    float line2  = max(smothstep(th, 0.0, min(abs(ca-c2),abs(c0-cb))), line1);
    float diffboost = 0.0;
 
+   float b1 = 0.0;
+   float b2 = 0.0;
+
 if (params.ntsc_fonts > 0.255)
+{   
+      for (float i = 0.0; i < 12.0; i++) 
+	     if (max(min(fract(texture(NPass1, texcoord0 - i*yy-xx).a), fract(texture(NPass1, texcoord0 - i*yy).a)), min(fract(texture(NPass1, texcoord0 - i*yy+xx+xx).a), fract(texture(NPass1, texcoord0 - i*yy+xx+xx).a))) < 0.25) b1++; else break;
+      for (float i = 0.0; i < 12.0; i++) 
+	     if (max(min(fract(texture(NPass1, texcoord0 + i*yy-xx).a), fract(texture(NPass1, texcoord0 + i*yy).a)), min(fract(texture(NPass1, texcoord0 + i*yy+xx+xx).a), fract(texture(NPass1, texcoord0 + i*yy+xx+xx).a))) < 0.25) b2++; else break;
+}
+
+if (params.ntsc_fonts > 0.255 && (b1+b2) < 12.0)
 {    
-   float b1 = texture(NPass1, texcoord0 - yy).a;
-   float d1 = texture(NPass1, texcoord0 + yy).a;
-   float d2 = texture(NPass1, texcoord0 + xx + yy).a;
-   float maxdif = float(0.5*((abs(c0-c1)+abs(c1-c2))) > (1.0 - params.ntsc_fonts)) * float(abs(c2-c0) < 0.05);
+   float m1 = max(max(c0,c1),c2);
+   float m2 = min(min(c0,c1),c2);
+   float cont = m1+m2;
+   
+   float b1 = texture(Source, texcoord0 - yy).a;
+   float d1 = texture(Source, texcoord0 + yy).a;
+   float d2 = texture(Source, texcoord0 + xx + yy).a;
+   float maxdif = float(0.5*((abs(c0-c1)+abs(c1-c2))) > (cont - params.ntsc_fonts)) * float(abs(c2-c0) < 0.05);
    
    float linecb  = smothstep(0.1, 0.0, max(abs(c1-b1),abs(c1-d1))); // checkerboard check
    linecb = linecb * float (abs(c1-b1)<0.05 || abs(c2-d2)<0.05);
-   
+
    float xdif1 = 0.0;
    float xdif2 = 0.0;
    float th = 0.215;
@@ -194,10 +211,24 @@ if (params.ntsc_fonts > 0.255)
       cb = texture(Source, texcoord +  j*xx).x;
       xdif1 = max(abs(ca-c0)-th, xdif1);
       xdif2 = max(abs(cb-c2)-th, xdif2);
+   
+      ca = texture(Source, texcoord -  i*xx - yy).x;
+      c0 = texture(Source, texcoord -  j*xx - yy).x;
+      c2 = texture(Source, texcoord +  i*xx - yy).x;
+      cb = texture(Source, texcoord +  j*xx - yy).x;  
+      xdif1 = max(abs(ca-c0)-th, xdif1);
+      xdif2 = max(abs(cb-c2)-th, xdif2);   
+      
+	  ca = texture(Source, texcoord -  i*xx + yy).x;
+      c0 = texture(Source, texcoord -  j*xx + yy).x;
+      c2 = texture(Source, texcoord +  i*xx + yy).x;
+      cb = texture(Source, texcoord +  j*xx + yy).x;  
+      xdif1 = max(abs(ca-c0)-th, xdif1);
+      xdif2 = max(abs(cb-c2)-th, xdif2);
    }   
    float linex = smothstep(0.0, 0.125, min(xdif1,xdif2));
    
-   diffboost = min(linex*linecb*maxdif, 0.625);
+   diffboost = min(linex*linecb*maxdif, 0.75);
 }
    
    vec3 ref = texture(Source, texcoord).xyz;
@@ -219,7 +250,7 @@ if (params.ntsc_fonts > 0.255)
       ref.yz = mix(ref1,ref2,rdf1);
    }
    
-   float lum1 = min(texture(NPass1, vTex - dx).a, texture(NPass1, vTex + dx).a);
+   float lum1 = min(texture(Source, vTex - dx).a, texture(Source, vTex + dx).a);
    float lum2 = ref.x;
    vec3 l3 = abs(l1-l2);
    
