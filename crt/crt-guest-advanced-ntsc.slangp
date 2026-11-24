@@ -1,6 +1,5 @@
 shaders = 19
 
-
 shader0 = shaders/guest/advanced/stock.slang
 filter_linear0 = false
 scale_type0 = source

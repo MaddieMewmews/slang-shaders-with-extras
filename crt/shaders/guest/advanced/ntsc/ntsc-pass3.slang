@@ -38,11 +38,11 @@ float auto_rez = mix(1.0, 0.5, clamp(params.auto_res * round(params.OriginalSize
 #pragma parameter ntsc_phase    "NTSC Phase: Auto | 2 phase | 3 phase | Mixed | PCE" 1.0 1.0 5.0 1.0
 #pragma parameter ntsc_rainbow1 "NTSC Coloring/Rainbow Effect (2-phase)"  0.0 0.0 3.0 1.0
 #pragma parameter ntsc_sharp  "NTSC Sharpness (Adaptive)" 0.0 -10.0 10.0 0.50
-#pragma parameter ntsc_fonts  "NTSC Preserve Fonts (0.25 = OFF)" 0.25 0.25 0.75 0.05
 #pragma parameter ntsc_shape  "NTSC Sharpness Shape" 0.80 0.5 1.0 0.025
 #pragma parameter ntsc_charp  "NTSC Preserve 'Edge' Colors 2-phase" 0.0 0.0 10.0 0.50
 #pragma parameter ntsc_charp3 "NTSC Preserve 'Edge' Colors 3-phase" 0.0 0.0 10.0 0.50
 #pragma parameter ntsc_gamma  "NTSC Filtering Gamma Correction" 1.0 0.25 2.5 0.025
+#pragma parameter ntsc_fonts  "NTSC Preserve Fonts (0.25 = OFF)" 0.25 0.25 0.75 0.05
 #pragma parameter ntsc-row5 "------------------------------------------------" 0.0 0.0 0.0 1.0
 #pragma parameter RFNOISE     "NTSC RF Noise Frequency  " 0.30 0.0 1.0 0.01
 #pragma parameter RFNOISE1    "NTSC RF Noise Luma+      " 0.00 0.0 0.7 0.01
@@ -135,6 +135,10 @@ vec3 rgb2yiq(vec3 col)
 void main()
 {
 
+float diffboost = 0.0;
+float lb1 = 0.0;
+float lb2 = 0.0;
+   
 if (speedup > 1.25 && ((params.OriginalSize.y > 500.0 && params.SourceSize.y > 820.0) || params.SourceSize.y > 820.0))
 {
    vec3 signal = texture(Source, vTexCoord0).xyz;
@@ -171,21 +175,16 @@ else
    float line0  = smothstep(th, 0.0, min(abs(c1-c0),abs(c2-c1)));
    float line1  = max(smothstep(th, 0.0, min(abs(ca-c0),abs(c2-cb))), line0);
    float line2  = max(smothstep(th, 0.0, min(abs(ca-c2),abs(c0-cb))), line1);
-   float diffboost = 0.0;
-
-   float b1 = 0.0;
-   float b2 = 0.0;
 
 if (params.ntsc_fonts > 0.255)
-{   
-      for (float i = 0.0; i < 12.0; i++) 
-	     if (max(min(fract(texture(NPass1, texcoord0 - i*yy-xx).a), fract(texture(NPass1, texcoord0 - i*yy).a)), min(fract(texture(NPass1, texcoord0 - i*yy+xx+xx).a), fract(texture(NPass1, texcoord0 - i*yy+xx+xx).a))) < 0.25) b1++; else break;
-      for (float i = 0.0; i < 12.0; i++) 
-	     if (max(min(fract(texture(NPass1, texcoord0 + i*yy-xx).a), fract(texture(NPass1, texcoord0 + i*yy).a)), min(fract(texture(NPass1, texcoord0 + i*yy+xx+xx).a), fract(texture(NPass1, texcoord0 + i*yy+xx+xx).a))) < 0.25) b2++; else break;
-}
-
-if (params.ntsc_fonts > 0.255 && (b1+b2) < 12.0)
 {    
+    for (float i = 0.0; i < 14.0; i++) {
+         float sum1 = fract(2.0*texture(NPass1, texcoord0 - i*yy).a) + fract(2.0*texture(NPass1, texcoord0 - i*yy -xx).a) + fract(2.0*texture(NPass1, texcoord0 - i*yy+xx).a); sum1 = max(1.5-sum1,0.0); if (sum1 > 0.75) lb1++; else break; }
+    for (float i = 1.0; i < 14.0; i++) {
+         float sum2 = fract(2.0*texture(NPass1, texcoord0 + i*yy).a) + fract(2.0*texture(NPass1, texcoord0 + i*yy -xx).a) + fract(2.0*texture(NPass1, texcoord0 + i*yy+xx).a); sum2 = max(1.5-sum2,0.0); if (sum2 > 0.75) lb2++; else break; }	 
+		 
+if ((lb1+lb2) < 14.0)
+{
    float m1 = max(max(c0,c1),c2);
    float m2 = min(min(c0,c1),c2);
    float cont = m1+m2;
@@ -202,33 +201,53 @@ if (params.ntsc_fonts > 0.255 && (b1+b2) < 12.0)
    float xdif2 = 0.0;
    float th = 0.215;
    
-   for (float i = 0.5; i < 10.5; i++)
+   for (float i = 0.5; i < 5.5; i = i + 1.0)
    {  
       float j = i + 1.0;   
       ca = texture(Source, texcoord -  i*xx).x;
       c0 = texture(Source, texcoord -  j*xx).x;
       c2 = texture(Source, texcoord +  i*xx).x;
       cb = texture(Source, texcoord +  j*xx).x;
-      xdif1 = max(abs(ca-c0)-th, xdif1);
+      
+	  xdif1 = max(abs(ca-c0)-th, xdif1);
       xdif2 = max(abs(cb-c2)-th, xdif2);
    
       ca = texture(Source, texcoord -  i*xx - yy).x;
       c0 = texture(Source, texcoord -  j*xx - yy).x;
       c2 = texture(Source, texcoord +  i*xx - yy).x;
       cb = texture(Source, texcoord +  j*xx - yy).x;  
-      xdif1 = max(abs(ca-c0)-th, xdif1);
+      
+	  xdif1 = max(abs(ca-c0)-th, xdif1);
       xdif2 = max(abs(cb-c2)-th, xdif2);   
+
+      ca = texture(Source, texcoord -  i*xx - xx).x;
+      c0 = texture(Source, texcoord -  j*xx - xx).x;
+      c2 = texture(Source, texcoord +  i*xx - xx).x;
+      cb = texture(Source, texcoord +  j*xx - xx).x;  
+      
+	  xdif1 = max(abs(ca-c0)-th, xdif1);
+      xdif2 = max(abs(cb-c2)-th, xdif2); 
       
 	  ca = texture(Source, texcoord -  i*xx + yy).x;
       c0 = texture(Source, texcoord -  j*xx + yy).x;
       c2 = texture(Source, texcoord +  i*xx + yy).x;
       cb = texture(Source, texcoord +  j*xx + yy).x;  
-      xdif1 = max(abs(ca-c0)-th, xdif1);
+     
+	  xdif1 = max(abs(ca-c0)-th, xdif1);
       xdif2 = max(abs(cb-c2)-th, xdif2);
+
+	  ca = texture(Source, texcoord -  i*xx + xx).x;
+      c0 = texture(Source, texcoord -  j*xx + xx).x;
+      c2 = texture(Source, texcoord +  i*xx + xx).x;
+      cb = texture(Source, texcoord +  j*xx + xx).x;  
+     
+	  xdif1 = max(abs(ca-c0)-th, xdif1);
+      xdif2 = max(abs(cb-c2)-th, xdif2);	  
    }   
-   float linex = smothstep(0.0, 0.125, min(xdif1,xdif2));
+   float linex = smothstep(0.0, 0.115, max(xdif1, xdif2));
    
-   diffboost = min(linex*linecb*maxdif, 0.75);
+   diffboost = min(linex*linecb*maxdif, 0.85);
+}   
 }
    
    vec3 ref = texture(Source, texcoord).xyz;
@@ -271,7 +290,8 @@ if (params.ntsc_fonts > 0.255 && (b1+b2) < 12.0)
    if (ntsc_sharp > 0.25 || params.ntsc_fonts > 0.255)
    {
       float mixer = sweighr;
-      if (params.ntsc_sharp < -0.25) mixer = sweight; mixer*=max(0.1*ntsc_sharp, diffboost*1.25);
+      if (params.ntsc_sharp < -0.25) mixer = sweight;
+	  mixer = max(0.1*ntsc_sharp*mixer, diffboost);
       float lummix = mix(lum2, lum1, mixer);
       float lm1 =  mix(lum2*lum2, lum1*lum1,mixer); lm1 = sqrt(lm1);
       float lm2 =  mix(sqrt(lum2), sqrt(lum1),mixer); lm2 = lm2*lm2;

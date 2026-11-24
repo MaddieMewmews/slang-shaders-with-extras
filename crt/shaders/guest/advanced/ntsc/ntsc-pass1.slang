@@ -17,11 +17,12 @@ layout(push_constant) uniform Push
    float ntsc_dith;
    float nscale;
    float ntsc_samp;
+   float ntsc_fonts;   
 } params;
 
 layout(std140, set = 0, binding = 0) uniform UBO
 {
-	mat4 MVP;
+    mat4 MVP;
 } global;
 
 #pragma parameter ntsc-row0 "------------------------------------------------" 0.0 0.0 0.0 1.0
@@ -36,8 +37,9 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #pragma parameter ntsc-row2 "------------------------------------------------" 0.0 0.0 0.0 1.0
 #pragma parameter ntsc_fields "NTSC Merge Fields: Auto | NO | YES" -1.0 -1.0 1.0 1.0
 #pragma parameter ntsc_phase  "NTSC Phase: Auto | 2 phase | 3 phase | Mixed | PCE" 1.0 1.0 5.0 1.0
-#pragma parameter nscale      "NTSC Filter (Resolution) Scaling" 1.25 0.20 5.0 0.05
-#pragma parameter ntsc_dith   "NTSC De-dithering: 0:OFF | 1:CB+BAR | 2:CB+Bar-S | 3:CB-Mixed" 2.0 0.0 3.0 1.0
+#pragma parameter nscale      "NTSC Filter (Resolution) Scaling" 1.0 0.20 5.0 0.05
+#pragma parameter ntsc_dith   "NTSC De-Dith: 0:OFF | 1-2:CB+Bar | 3:CB+Bar(Fonts) | 4:CB-Mixed" 0.0 0.0 4.0 1.0
+#pragma parameter ntsc_fonts  "NTSC Preserve Fonts (0.25 = OFF)" 0.25 0.25 0.75 0.05
 #pragma parameter ntsc_sat    "NTSC Color Saturation" 1.0 0.0 2.0 0.01
 #pragma parameter ntsc_bright "NTSC Brightness" 1.0 0.0 1.5 0.01
 #pragma parameter ntsc_gamma  "NTSC Filtering Gamma Correction" 1.0 0.25 2.5 0.025
@@ -147,15 +149,6 @@ float get_luma(vec3 c)
 	return dot(c, vec3(0.2989, 0.5870, 0.1140));
 }
 
-
-float barcheck(vec2 tex, vec2 x, vec2 y)
-{
-   float c0 = get_luma(texture(Source, tex - x + y).rgb);
-   float c1 = get_luma(texture(Source, tex     + y).rgb);
-   float c2 = get_luma(texture(Source, tex + x + y).rgb);   
-   return 1.0-step(min(abs(c1-c0),abs(c1-c2)), 0.025);
-}
-
 void main()
 {
 if (vTexCoord.x > 1.0) FragColor = 0.0.xxxx; else
@@ -174,10 +167,10 @@ if (vTexCoord.x > 1.0) FragColor = 0.0.xxxx; else
    float res = params.nscale;
    float dd = 1.0;
    float linres = 0.0;
+   vec2 TexD = (floor(vTexCoord * params.OriginalSize.xy) + 0.5)*params.OriginalSize.zw;   
    
-   if (ntsc_dith > 0.5 && params.OriginalSize.y < 300.0 && (phase == 2.0 || params.ntsc_phase > 3.5))
+   if (((ntsc_dith > 0.5 && params.nscale > 1.025) || (params.ntsc_fonts > 0.255)) && params.OriginalSize.y < 300.0 && (phase == 2.0 || params.ntsc_phase > 3.5))
    {
-      vec2 TexD = (floor(vTexCoord * params.OriginalSize.xy) + 0.5)*params.OriginalSize.zw;
       vec2 xx = vec2(params.OriginalSize.z, 0.0);
       vec2 yy = vec2(0.0, params.OriginalSize.w);
       vec3 ca = vec3(get_luma(texture(Source, TexD - xx - xx - yy).rgb), get_luma(texture(Source, TexD - xx - xx).rgb), get_luma(texture(Source, TexD - xx - xx + yy).rgb));
@@ -193,7 +186,7 @@ if (vTexCoord.x > 1.0) FragColor = 0.0.xxxx; else
 	  vec3 line4  = max(smstep(0.075.xxx, 0.35*max(c1,1.0-c1), max(min(abs(c1-cb),abs(c0-c2)),min(abs(c1-ca),abs(c0-c2)))), line3);
       vec3 line5  = step(min(max(abs(c0-c2),abs(c1-ca)),max(abs(c0-c2),abs(c1-cb))), 0.025.xxx);
 	  float dth   = step(max(abs(c1.y-c0.y),abs(c1.y-c2.y)), 0.25);
-	  vec3 linebar = mix(line3, line0, line5); if (ntsc_dith == 2.0) linebar = line0;
+	  vec3 linebar = mix(line3, line0, line5); if (ntsc_dith == 2.0 || ntsc_dith == 3.0) linebar = line0;
 	  vec3 linecb = mix(mix(line3, line4, dth), line0, line5);
 
 	  float line6 = dth*min(step(min(abs(c1.y-c1.x),abs(c1.y-c1.z)),0.03), max(step(max(abs(c0.y-c0.x),abs(c0.y-c0.z)),0.03) , step(max(abs(c2.y-c2.x),abs(c2.y-c2.z)),0.03)));
@@ -203,12 +196,19 @@ if (vTexCoord.x > 1.0) FragColor = 0.0.xxxx; else
 	  linebar.y = min(linebar.y, max(linebar.x,linebar.z));
 	  linecb.y  = max(linecb.y, line6);
 
-      linres = (ntsc_dith < 2.5) ? linebar.y : linecb.y;
+      linres = (ntsc_dith < 3.5) ? linebar.y : linecb.y;
 
 	  float nd = max(res-1.0, 0.0);
       dd = 1.0 + (1.0-linres) * nd;
 	  res /= dd;
-      linres = 0.5*linebar.y + linecb.y;
+
+      vec3 lineb = 0.0.xxx;
+	  lineb.x = float(abs(c0.x-c2.x) < 0.035 && (abs(c1.x-ca.x) < 0.035 || abs(c1.x-cb.x) < 0.035) && max(abs(ca.x-c0.x),abs(cb.x-c2.x)) > 0.035); 
+	  lineb.y = float(abs(c0.y-c2.y) < 0.035 && (abs(c1.y-ca.y) < 0.035 || abs(c1.y-cb.y) < 0.035) && min(abs(c0.y-c0.x),abs(c0.y-c0.z)) < 0.035); 
+	  lineb.z = float(abs(c0.z-c2.z) < 0.035 && (abs(c1.z-ca.z) < 0.035 || abs(c1.z-cb.z) < 0.035) && max(abs(ca.z-c0.z),abs(cb.z-c2.z)) > 0.035);
+	  lineb.y = min(lineb.y, max(lineb.x,lineb.z)) * (1.0-linebar.y);
+	  
+      linres = 0.25*linebar.y + 0.5*linecb.y + 2.0*lineb.y;
    }
 
 if (MERGE > 0.5)

@@ -34,8 +34,8 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #pragma parameter ntsc_samp "          Hi-Res Sampling Behaviour: Default | Old" 1.0 1.0 2.0 1.0
 #pragma parameter ntsc_gamma   "NTSC Filtering Gamma Correction" 1.0 0.25 2.5 0.025
 #pragma parameter ntsc_phase   "NTSC Phase: Auto | 2 phase | 3 phase | Mixed | PCE" 1.0 1.0 5.0 1.0
-#pragma parameter nscale       "NTSC Filter (Resolution) Scaling" 1.25 0.20 5.0 0.05
-#pragma parameter ntsc_dith    "NTSC De-dithering: 0:OFF | 1:CB+BAR | 2:CB+Bar-S | 3:CB-Mixed" 2.0 0.0 3.0 1.0
+#pragma parameter nscale       "NTSC Filter (Resolution) Scaling" 1.0 0.20 5.0 0.05
+#pragma parameter ntsc_dith    "NTSC De-Dith: 0:OFF | 1-2:CB+Bar | 3:CB+Bar(Fonts) | 4:CB-Mixed" 0.0 0.0 4.0 1.0
 #pragma parameter ntsc_taps    "NTSC # of Taps (Filter Width)" 32.0 6.0 32.0 1.0
 #pragma parameter ntsc_cscale  "NTSC Chroma Scaling / Bleeding (2-phase)" 1.0 0.20 5.00 0.05
 #pragma parameter ntsc_cscale1 "NTSC Chroma Scaling / Bleeding (3-phase)" 1.0 0.20 2.50 0.05
@@ -45,7 +45,7 @@ layout(std140, set = 0, binding = 0) uniform UBO
 #pragma parameter ntsc_ring    "NTSC Anti-Ringing" 0.5 0.0 1.0 0.10
 
 #define speedup params.speedup
-#define nscale params.nscale;
+#define nscale params.nscale
 #define ntsc_dith params.ntsc_dith
 
 #pragma stage vertex
@@ -247,41 +247,42 @@ float luma_filter_3_phase[33] = float[33](
    vec2 TexD = (floor(vTexCoord * params.OriginalSize.xy) + 0.5)*params.OriginalSize.zw;
    float dd = 1.0;
    
-   if (ntsc_dith > 0.5 && params.OriginalSize.y < 300.0 && (phase == 2.0 || params.ntsc_phase > 3.5))
+   if ((ntsc_dith > 0.5) && (nscale > 1.025) && params.OriginalSize.y < 300.0 && (phase == 2.0 || params.ntsc_phase > 3.5))
    {
-      vec2 TexD = (floor(vTexCoord * params.OriginalSize.xy) + 0.5)*params.OriginalSize.zw;
       vec2 xx = vec2(params.OriginalSize.z, 0.0);
       vec2 yy = vec2(0.0, params.OriginalSize.w);
-      vec3 ca = vec3(get_luma(texture(PrePass0, TexD - xx - xx - yy).rgb), get_luma(texture(PrePass0, TexD - xx - xx).rgb), get_luma(texture(PrePass0, TexD - xx - xx + yy).rgb));
+      vec3 cx = vec3(get_luma(texture(PrePass0, TexD - 3.0*xx - yy).rgb), get_luma(texture(PrePass0, TexD - 3.0*xx).rgb), get_luma(texture(PrePass0, TexD - 3.0*xx + yy).rgb));      
+	  vec3 ca = vec3(get_luma(texture(PrePass0, TexD - xx - xx - yy).rgb), get_luma(texture(PrePass0, TexD - xx - xx).rgb), get_luma(texture(PrePass0, TexD - xx - xx + yy).rgb));
       vec3 c0 = vec3(get_luma(texture(PrePass0, TexD - xx - yy).rgb), get_luma(texture(PrePass0, TexD - xx).rgb), get_luma(texture(PrePass0, TexD - xx + yy).rgb));
       vec3 c1 = vec3(get_luma(texture(PrePass0, TexD - yy).rgb), get_luma(texture(PrePass0, TexD).rgb), get_luma(texture(PrePass0, TexD +yy).rgb));
       vec3 c2 = vec3(get_luma(texture(PrePass0, TexD + xx - yy).rgb), get_luma(texture(PrePass0, TexD + xx).rgb), get_luma(texture(PrePass0, TexD + xx + yy).rgb));
       vec3 cb = vec3(get_luma(texture(PrePass0, TexD + xx + xx - yy).rgb), get_luma(texture(PrePass0, TexD + xx + xx).rgb), get_luma(texture(PrePass0, TexD + xx + xx + yy).rgb));
-	  vec3 line0  = step(min(abs(c1-c0),abs(c2-c1)), 0.01.xxx);
-           line0  =	max(step(abs(c1-c0)+abs(c2-c1), abs(c0-c2)),line0);  
-      vec3 line1  = max(step(min(abs(ca-c0),abs(c2-cb)), 0.01.xxx), line0);
-      vec3 line2  = max(step(min(abs(ca-c2),abs(c0-cb)), 0.01.xxx), line1);
+      vec3 cy = vec3(get_luma(texture(PrePass0, TexD + 3.0*xx - yy).rgb), get_luma(texture(PrePass0, TexD + 3.0*xx).rgb), get_luma(texture(PrePass0, TexD + 3.0*xx + yy).rgb));
+      vec3 line0  = step(min(abs(c1-c0),abs(c2-c1)), 0.25*abs(c0-c2));
+           line0  =	max(step(abs(c1-c0)+abs(c2-c1),  0.25*abs(c0-c2)),line0);
+           line0  = max(step(abs(cx-ca)+abs(c2-cb),  0.025.xxx), line0); line0  = max(step(abs(cy-cb)+abs(c0-ca), 0.025.xxx), line0);
+	  vec3 line1  = max(step(min(abs(ca-c0),abs(c2-cb)), 0.025.xxx), line0);
+      vec3 line2  = max(step(min(abs(ca-c2),abs(c0-cb)), 0.025.xxx), line1);
       vec3 line3  = max(step(max(abs(ca-c0),abs(c2-cb)), 0.15.xxx), line2);	  
 	  vec3 line4  = max(smstep(0.075.xxx, 0.35*max(c1,1.0-c1), max(min(abs(c1-cb),abs(c0-c2)),min(abs(c1-ca),abs(c0-c2)))), line3);
-      vec3 line5  = step(min(max(abs(c0-c2),abs(c1-ca)),max(abs(c0-c2),abs(c1-cb))), 0.025.xxx);
-	  float dth   = smothstep(0.175, 0.25, max(abs(c1.y-c0.y),abs(c1.y-c2.y)));
-	  vec3 linebar = mix(line3, line0, line5);
-	  vec3 linecb = mix(mix(line3, line4, dth), line0, line5);
 
-	  float line6 = dth*min(step(min(abs(c1.y-c1.x),abs(c1.y-c1.z)),0.03), max(step(max(abs(c0.y-c0.x),abs(c0.y-c0.z)),0.03) , step(max(abs(c2.y-c2.x),abs(c2.y-c2.z)),0.03)));
+      vec3 line5  = step(min(max(abs(c0-c2),abs(c1-ca)),max(abs(c0-c2),abs(c1-cb))), 0.025.xxx);
+      float dth   = smothstep(0.24, 0.25, max(abs(c1.y-c0.y),abs(c1.y-c2.y)));
+      vec3 linebar = mix(line3, line0, line5);
+      vec3 linecb = mix(mix(line3, line4, dth), line0, line5);
+	  float line6 = dth*min(step(min(abs(c1.y-c1.x),abs(c1.y-c1.z)),0.5*max(abs(c1.y-c0.y),abs(c1.y-c2.y))), max(step(max(abs(c0.y-c0.x),abs(c0.y-c0.z)),0.5*max(abs(c0.y-ca.y),abs(c0.y-c1.y))) , step(max(abs(c2.y-c2.x),abs(c2.y-c2.z)),0.5*max(abs(c2.y-c1.y),abs(c2.y-cb.y)))));
 	  linecb.y = (min(max(abs(c1.y-c1.x),abs(c0.y-c0.x)), max(abs(c1.y-c1.x),abs(c2.y-c2.x))) < 0.025) ? max(linecb.y, dth) : linecb.y;
-	  linecb.y = (min(max(abs(c1.y-c1.z),abs(c0.y-c0.z)), max(abs(c1.y-c1.z),abs(c2.y-c2.z))) < 0.025) ? max(linecb.y, dth) : linecb.y;	  
-	  
+      linecb.y = (min(max(abs(c1.y-c1.z),abs(c0.y-c0.z)), max(abs(c1.y-c1.z),abs(c2.y-c2.z))) < 0.025) ? max(linecb.y, dth) : linecb.y;	  
       linebar.y = min(linebar.y, max(linebar.x,linebar.z));
       linecb.y  = max(linecb.y, line6);
-
-      float linres = (ntsc_dith < 2.5) ? linebar.y : linecb.y;
+	  
+      float linres = (ntsc_dith < 3.5) ? linebar.y : linecb.y;
     
-   if (ntsc_dith == 2.0 && linebar.y < 0.5 && linecb.y > 0.5)
+   if (ntsc_dith == 2.0 || ntsc_dith == 3.0)
    {   
-	  float mn = 1.0; float mx = 0.0; float cbi = 0.0; float bri = 0.0; float b1 = 0.0; float b2 = 0.0;
+	  float mn = 1.0; float mx = 0.0; float cbi = 0.0; float bri = 0.0; float b1 = 0.0; float b2 = 0.0; float sbi = 0.0;
 
-      float tmp = 0.0; float dmp = 0.0;
+      float tmp = 0.0; float cmp = 0.0;
       for (float i = -1.0; i <= 1.0; i++) 
 	     for (float j = -1.0; j <= 1.0; j++)
 	     {
@@ -294,20 +295,22 @@ float luma_filter_3_phase[33] = float[33](
          for (float i = -ii[int(abs(j))]; i <= ii[int(abs(j))]; i++)
 	     {
 		 	  tmp = get_luma(texture(PrePass0, TexD + i*xx + j*yy).rgb);
-			  dmp = texture(Source, TexD  + i*xx + j*yy).a;
-			  if (dmp > 0.75 && (abs(tmp-mn) < 0.025 ||  abs(tmp-mx) < 0.025)) cbi++;
-			  if (dmp < 0.25 && (abs(tmp-mn) > 0.025 &&  abs(tmp-mx) > 0.025)) bri++;			  
+			  cmp = texture(Source, TexD  + i*xx + j*yy).a; float fmp = fract(cmp);
+			  bool lsame = (abs(tmp-mn) < 0.025 ||  abs(tmp-mx) < 0.025);
+			  if (fmp > 0.65 && lsame ) cbi++;
+			  if (cmp < 0.25 && !lsame) bri++;
+              if (cmp > 1.50 && lsame ) sbi++;
 		 }
 	  
-      for (float i = 0.0; i < 12.0; i++) 
-	     if (max(min(fract(texture(Source, TexD - i*yy-xx).a), fract(texture(Source, TexD - i*yy).a)), min(fract(texture(Source, TexD - i*yy+xx+xx).a), fract(texture(Source, TexD - i*yy+xx+xx).a))) < 0.25) b1++; else break;
-      for (float i = 0.0; i < 12.0; i++) 
-	     if (max(min(fract(texture(Source, TexD + i*yy-xx).a), fract(texture(Source, TexD + i*yy).a)), min(fract(texture(Source, TexD + i*yy+xx+xx).a), fract(texture(Source, TexD + i*yy+xx+xx).a))) < 0.25) b2++; else break;
-
+      for (float i = 0.0; i < 14.0; i++) {
+	     float sum1 = fract(2.0*texture(Source, TexD - i*yy).a) + fract(2.0*texture(Source, TexD - i*yy -xx).a) + fract(2.0*texture(Source, TexD - i*yy+xx).a); sum1 = max(1.5-sum1,0.0); if (sum1 > 0.75) b1++; else break; }
+      for (float i = 1.0; i < 14.0; i++) {
+	     float sum2 = fract(2.0*texture(Source, TexD + i*yy).a) + fract(2.0*texture(Source, TexD + i*yy -xx).a) + fract(2.0*texture(Source, TexD + i*yy+xx).a); sum2 = max(1.5-sum2,0.0); if (sum2 > 0.75) b2++; else break; }
 	  
-	  if ((cbi > bri) && (b1+b2) < 12.0) linres = linecb.y;
-	}
-	
+	  if (((cbi > bri) && (b1+b2) < 14.0) || (b1+b2) < 3.0) linres = linecb.y;
+	  
+	  if ((ntsc_dith == 2.0) && linres == linecb.y) if(sbi > 0.5*cbi || sbi < bri) linres = linebar.y;
+   }
 	  float nd = max(res-1.0, 0.0);
       dd = 1.0 + (1.0-linres) * nd;
 	  res /= dd;
@@ -386,7 +389,7 @@ float luma_filter_3_phase[33] = float[33](
       float c = get_luma(texture(PrePass0, vTexCoord + 2.0*dx).rgb);
       float d = get_luma(texture(PrePass0, vTexCoord +     dx).rgb);
       float e = get_luma(texture(PrePass0, vTexCoord         ).rgb);	  
-      signal.x = mix(signal.x, clamp(signal.x, min(min(min(a,b),min(c,d)),e), max(max(max(a,b),max(c,d)),e)), params.ntsc_ring);
+      signal.x = mix(signal.x, clamp(signal.x, pow(min(min(min(a,b),min(c,d)),e), params.ntsc_gamma), pow(max(max(max(a,b),max(c,d)),e), params.ntsc_gamma)), params.ntsc_ring);
    }
    
    float orig = get_luma(texture(PrePass0, TexD * vec2(speedup, 1.0)).rgb);
